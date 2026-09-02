@@ -90,7 +90,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
           python -m pytest tests/test_object_layer.py -q
-          python tools/ontology/export_for_ui.py
+          python tools/ontology/export_for_ui.py   # 默认导出示例租户，与仓库里的成品一致
           python tools/ontology/build_ui.py
           git diff --exit-code --stat docs/ontology/ui/ \
             || (echo "✗ 本体改了但 ui/ 没重新生成：跑 export_for_ui.py + build_ui.py 后提交" && exit 1)

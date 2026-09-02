@@ -113,10 +113,11 @@ class TestNavigation:
         assert "profiles" in nav["remember"], "要告诉人怎么把答案固化下来"
 
     def test_unregistered_link_is_blocked(self):
+        """navigate 现在是协程（要探测下游），未登记的链接在 await 时被拦下。"""
         load.cache_clear()
         d = Dispatcher(ontology=load(tenant=""), transport=FakeTransport())
         with pytest.raises(OntologyError):
-            d.navigate("采购订单", "销售出库单", "X")
+            asyncio.run(d.navigate("采购订单", "销售出库单", "X"))
 
 
 class TestSearchAndCards:
@@ -159,3 +160,85 @@ class TestDispatcherIntegration:
         with pytest.raises(OntologyError) as e:
             asyncio.run(d.object_card("采购订单", "NOPE"))
         assert "内码" in str(e.value) and "编号" in str(e.value)
+
+
+class TestIdentify:
+    """「这张单是什么单」——按编号前缀推断，返回候选而非断言。"""
+
+    def test_known_prefix_yields_candidate_with_evidence(self, m):
+        r = m.identify("CGDD000231")
+        assert r["candidates"][0]["form_id"] == "PUR_PurchaseOrder"
+        assert r["candidates"][0]["evidence"], "每条前缀都要能说出依据，不能是编的"
+        assert "未经账套核实" in r["note"]
+
+    def test_longer_prefix_wins_and_dedupes(self, m):
+        """CGRKD 与 CGRK 都命中同一类型时，只列一次。"""
+        assert [c["form_id"] for c in m.identify("CGRKD2026040015")["candidates"]] \
+            == ["STK_InStock"]
+
+    def test_unknown_prefix_does_not_pretend(self, m):
+        r = m.identify("ZZZ001")
+        assert r["candidates"] == []
+        assert "不代表单号有问题" in r["note"], "认不出≠单号错，措辞不能误导"
+        assert "bill_prefixes" in r["note"], "要告诉人怎么让系统记住"
+
+    def test_empty_input_rejected(self, m):
+        with pytest.raises(OntologyError):
+            m.identify("")
+
+
+class TestProbingNavigation:
+    """导航从"给候选"升级为"替你试"，并把试出来的答案提给知识库。"""
+
+    def _d(self, script, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        load.cache_clear()
+        return Dispatcher(ontology=load(tenant=""), transport=FakeTransport(script))
+
+    def test_probes_candidates_until_one_hits(self, tmp_path, monkeypatch):
+        d = self._d([[], [{"FBillNo": "RKD001"}]], tmp_path, monkeypatch)
+        r = asyncio.run(d.navigate("采购订单", "采购入库单", "CGDD000231"))
+        assert r["confirmed_by_probe"] is True
+        assert r["filter"].startswith("FSourceBillNo")
+        assert r["count"] == 1
+        assert len(r["tried"]) == 2, "第一个候选没命中，应继续试下一个"
+
+    def test_reports_honestly_when_nothing_hits(self, tmp_path, monkeypatch):
+        d = self._d([[], [], [], []], tmp_path, monkeypatch)
+        r = asyncio.run(d.navigate("采购订单", "采购入库单", "CGDD000231"))
+        assert r["confirmed_by_probe"] is False and r["count"] == 0
+        assert "也可能" in r["note"], "查不到有两种解释，不能只说一种"
+
+    def test_hit_proposes_a_link_filter_to_the_knowledge_base(self, tmp_path, monkeypatch):
+        d = self._d([[{"FBillNo": "RKD001"}]], tmp_path, monkeypatch)
+        asyncio.run(d.navigate("采购订单", "采购入库单", "CGDD000231"))
+        import json
+        kb = tmp_path / "wikiskill" / "knowledge.json"
+        assert kb.exists(), "试出来的答案应该沉淀，否则下次还要再试一遍"
+        e = json.loads(kb.read_text(encoding="utf-8"))["entries"][0]
+        assert e["kind"] == "link_filter_learned"
+        assert "profiles" in e["suggestion"] and "人眼核对" in e["suggestion"], \
+            "只提议不自动改——探测结果不等于账套确认"
+
+    def test_probe_can_be_switched_off(self, tmp_path, monkeypatch):
+        d = self._d([], tmp_path, monkeypatch)
+        r = asyncio.run(d.navigate("采购订单", "采购入库单", "X", try_candidates=False))
+        assert "candidate_filters" in r and "tried" not in r
+
+
+class TestApplicableOperations:
+    def test_object_card_lists_tenant_operations(self):
+        load.cache_clear()
+        mm = ObjectModel(load(tenant="example-tenant"))
+        ops = mm.card("销售订单")["operations"]
+        assert {o["zh"] for o in ops} == {"销售开票", "关闭超期订单"}
+        assert all(o["starts_here"] for o in ops)
+
+    def test_downstream_object_knows_it_is_not_the_start(self):
+        load.cache_clear()
+        mm = ObjectModel(load(tenant="example-tenant"))
+        ops = mm.card("客户开票申请单")["operations"]
+        assert ops and ops[0]["starts_here"] is False
+
+    def test_base_registry_has_no_operations(self, m):
+        assert m.card("销售订单")["operations"] == []

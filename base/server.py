@@ -166,6 +166,8 @@ class ObjectInput(BaseModel):
     category: str = Field(default="", description="按类别过滤：bill|master_data|view|system")
     navigate_to: Optional[str] = Field(
         default=None, description="要跳转到的下游单据类型（需同时给 id 作为源单编号）")
+    identify: str = Field(default="",
+                          description="只给单据编号、不知道是什么单时，填在这里")
 
 
 @mcp.tool(name="kd_object", annotations={
@@ -178,19 +180,23 @@ async def kd_object(params: ObjectInput) -> str:
     **此刻能对它做哪些动作**（不能做的会说明为什么、要先做什么）、
     以及它连到哪些别的对象。
 
-    三种用法：
-      kd_object(search="采购")                  搜索对象类型
-      kd_object(noun="采购订单")                 类型卡片：这类对象长什么样、能做什么
-      kd_object(noun="采购订单", id="CGDD000231") 实例卡片：这一张单此刻能做什么
+    用法：
+      kd_object(identify="CGDD000231")           只有单号、不知道是什么单
+      kd_object(search="采购")                    搜索对象类型
+      kd_object(noun="采购订单")                  类型卡片：这类对象长什么样、能做什么
+      kd_object(noun="采购订单", id="CGDD000231")  实例卡片：这一张单此刻能做什么
       kd_object(noun="采购订单", id="CGDD000231", navigate_to="采购入库单")
-                                               怎么跳到它的下游单据
+                                                查它的下游单据
 
+    卡片里的 operations 是本租户已经编排好的业务操作——有现成的就别自己拼步骤。
     拿到 actions 里 enabled=true 的动词后，用 kd_act 执行。"""
     d = _d()
+    if params.identify:
+        return _fmt(d.identify(params.identify))
     if params.navigate_to:
         if not params.id:
             return _fmt({"ok": False, "error": "navigate_to 需要同时给 id（源单编号）"})
-        return _fmt(d.navigate(params.noun, params.navigate_to, params.id))
+        return _fmt(await d.navigate(params.noun, params.navigate_to, params.id))
     if not params.noun:
         return _fmt(d.search_types(params.search, params.category))
     if params.search:

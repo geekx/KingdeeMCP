@@ -302,10 +302,78 @@ class Dispatcher:
                 f"两者不通用，系统也没有提供二者的解析动词（审计 L-3）。")
         return self.m.card(noun, props)
 
-    def navigate(self, noun: str, to: str, bill_no: str) -> dict:
-        """从一个对象跳到它的下游单据：给出该怎么查，不替调用方猜。"""
-        self.o.check_link(noun, to)
-        return self.m.navigate(noun, to, bill_no)
+    def identify(self, bill_no: str) -> dict:
+        """按编号前缀识别单据类型。启发式，返回候选而非断言。"""
+        return self.m.identify(bill_no)
+
+    async def navigate(self, noun: str, to: str, bill_no: str,
+                       try_candidates: bool = True, top: int = 20) -> dict:
+        """从一个对象跳到它的下游单据。
+
+        下游单据引用源单的字段名随表单与二开而异，静态推断不出唯一答案。
+        以前这里只返回候选过滤式让调用方自己试；现在**替它试**：
+        逐个候选查一次，命中即返回结果并说明是哪个字段生效。
+
+        命中之后会向知识库提一条「把 link_filter 写进 profile」的建议
+        （只提议，不自动改配置）——试出来的答案不该下次再试一遍。
+        """
+        link = self.o.check_link(noun, to)
+        plan = self.m.navigate(noun, to, bill_no)
+        if plan.get("confirmed"):
+            rows = await self.query(to, plan["filter"], top=top)
+            return {**plan, "rows": rows.get("rows", []), "count": rows.get("count", 0)}
+        if not try_candidates:
+            return plan
+
+        tried: list[dict] = []
+        for flt in plan["candidate_filters"]:
+            try:
+                r = await self.query(to, flt, top=top)
+            except Exception as exc:                 # 字段不存在会报错，属正常淘汰
+                tried.append({"filter": flt, "error": f"{type(exc).__name__}: {exc}"[:160]})
+                continue
+            n = r.get("count", 0)
+            tried.append({"filter": flt, "count": n})
+            if n:
+                self._propose_link_filter(noun, to, flt, link)
+                return {**plan, "confirmed_by_probe": True, "filter": flt,
+                        "rows": r.get("rows", []), "count": n, "tried": tried,
+                        "remember": plan["remember"],
+                        "note": (f"用 {flt.split('=')[0]} 查到了 {n} 条。"
+                                 f"这是**探测出来的**，不是账套确认的字段——"
+                                 f"把它写进 profile 之前建议人眼核对一下。")}
+        return {**plan, "confirmed_by_probe": False, "rows": [], "count": 0,
+                "tried": tried,
+                "note": ("所有候选字段都没查到下游单。可能确实还没下推，"
+                         "也可能本账套用了别的关联字段——"
+                         f"用 kd_describe(what='fields', key='{self.o.resolve_noun(to).form_id}') "
+                         "看真实字段清单。")}
+
+    def _propose_link_filter(self, src: str, dst: str, flt: str, link: dict) -> None:
+        """把探测出来的关联字段提给知识库。只提议，不自动改配置。"""
+        try:
+            import sys as _sys
+            from pathlib import Path as _P
+            _sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+            from wikiskill.knowledge import Entry, Knowledge
+            import hashlib
+            s = self.o.resolve_noun(src).form_id
+            t = self.o.resolve_noun(dst).form_id
+            field = flt.split("=")[0]
+            k = Knowledge()
+            k.merge(Entry(
+                id=hashlib.sha1(f"linkfilter|{s}|{t}".encode()).hexdigest()[:12],
+                kind="link_filter_learned",
+                title=f"{s} → {t} 的关联字段探测为 {field}",
+                detail=f"用 {flt} 查到了下游单据。",
+                suggestion=(f"人眼核对后，在 profiles/<租户>/profile.yml 的 links 里给 "
+                            f"{{from: {s}, to: {t}}} 加 "
+                            f"link_filter: \"{field}='{{bill_no}}'\"，此后不必再逐个试。"),
+                occurrences=1,
+                evidence=[{"from": s, "to": t, "filter": flt}]))
+            k.save()
+        except Exception:
+            pass  # 知识库不可用不该连累导航
 
     def search_types(self, keyword: str = "", category: str = "") -> dict:
         types = self.m.search_types(keyword, category)

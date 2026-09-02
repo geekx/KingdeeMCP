@@ -255,7 +255,42 @@ class ObjectModel:
             ] if props else ot.properties,
             "actions": actions,
             "links": [l.to_dict() for l in ot.links],
+            "operations": self._operations_for(ot.form_id),
         }
+
+    def _operations_for(self, form_id: str) -> list[dict]:
+        """本租户定义的业务操作里，哪些会碰到这类对象。
+
+        只给原子动作、不给现成流程，会让人以为得自己一步步拼——
+        而这类事租户往往已经编排好了。
+        """
+        out = []
+        for op in self.o.operations.values():
+            touched = set()
+            for st in op.steps:
+                for k in ("从", "到", "对象"):
+                    v = st.get(k)
+                    if v:
+                        try:
+                            touched.add(self.o.resolve_noun(v).form_id)
+                        except OntologyError:
+                            pass
+            if form_id in touched:
+                out.append({"key": op.key, "zh": op.zh, "owner": op.owner,
+                            "desc": op.desc, "steps": len(op.steps),
+                            "starts_here": bool(op.steps) and
+                            self._first_noun(op) == form_id})
+        return out
+
+    def _first_noun(self, op) -> Optional[str]:
+        for st in op.steps:
+            v = st.get("从") or st.get("对象")
+            if v:
+                try:
+                    return self.o.resolve_noun(v).form_id
+                except OntologyError:
+                    return None
+        return None
 
     def navigate(self, ref: str, link_target: str, bill_no: str) -> dict:
         """给出「从这个对象跳到它的下游单据」该怎么查。
@@ -284,6 +319,44 @@ class ObjectModel:
                     % tgt.form_id),
             "remember": ("确认后请在 profiles/<租户>/profile.yml 的对应 links 条目上加 "
                          "link_filter: \"FSrcBillNo='{bill_no}'\"，此后就不必再试。"),
+        }
+
+    def identify(self, bill_no: str) -> dict:
+        """「这张单是什么单？」——按编号前缀猜类型。
+
+        前缀由租户的编码规则决定（名词 SYS_NumberRule），所以这是**启发式**：
+        命中只说明"很可能是"，没命中也不说明"不是"。
+        因此返回的是**候选列表 + 置信度 + 依据**，不是一个断言。
+        """
+        no = (bill_no or "").strip().upper()
+        if not no:
+            raise OntologyError("要识别的单据编号不能为空")
+        hits = []
+        for prefix, meta in self.o.bill_prefixes.items():
+            if not no.startswith(prefix.upper()):
+                continue
+            fid = meta.get("form_id")
+            n = self.o.nouns.get(fid)
+            hits.append({"form_id": fid, "zh": n.zh if n else fid,
+                         "prefix": prefix, "confidence": "likely",
+                         "evidence": meta.get("evidence", "")})
+        # 长前缀优先（CGRKD 比 CGRK 更具体），并按类型去重——
+        # 同一个类型登记了多个前缀时，重复列出只是噪声。
+        hits.sort(key=lambda h: -len(h["prefix"]))
+        seen: set[str] = set()
+        hits = [h for h in hits if not (h["form_id"] in seen or seen.add(h["form_id"]))]
+        if hits:
+            return {"bill_no": bill_no, "candidates": hits,
+                    "note": ("按编号前缀推断，**未经账套核实**。"
+                             "确认用 kd_object(noun=候选, id=编号)——查得到就是它。"
+                             if len(hits) > 1 else
+                             "按编号前缀推断，**未经账套核实**。查一下即可确认。")}
+        return {
+            "bill_no": bill_no, "candidates": [],
+            "note": (f"前缀不在已登记的 {len(self.o.bill_prefixes)} 条里，认不出类型。"
+                     "这不代表单号有问题——各家的编码规则不同。"
+                     "知道是什么单就直接传 noun；想让系统记住，"
+                     "在 profiles/<租户>/profile.yml 的 bill_prefixes 段加一条。"),
         }
 
     # ── 检索 ──────────────────────────────────────────────────

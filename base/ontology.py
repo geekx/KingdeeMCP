@@ -104,6 +104,7 @@ class Ontology:
         self.states: dict[str, dict] = raw.get("states") or {}
         self.state_groups: dict[str, Any] = raw.get("state_groups") or {}
         self.links: list[dict] = raw.get("links") or []
+        self.bill_prefixes: dict[str, dict] = raw.get("bill_prefixes") or {}
         self.rules: list[dict] = raw.get("rules") or []
         self._link_index = {(l["from"], l["to"]): l for l in self.links}
         self.operations: dict[str, Operation] = {
@@ -226,6 +227,10 @@ class Ontology:
             return {"links": self.links}
         if what == "rules":
             return {"rules": self.rules}
+        if what == "prefixes":
+            return {"note": "编号前缀由租户的编码规则决定，此表为启发式，命中只说明"
+                            "『很可能是』；各家可在 profile 的 bill_prefixes 段覆盖。",
+                    "prefixes": self.bill_prefixes}
         if what == "operations":
             if key:
                 op = self.operation(key)
@@ -238,7 +243,7 @@ class Ontology:
                                    for o in self.operations.values()]}
         raise OntologyError(
             f"未知的描述对象 {what!r}。"
-            f"可用：verbs / nouns / states / links / rules / operations")
+            f"可用：verbs / nouns / states / links / rules / operations / prefixes")
 
     def operation(self, key: str) -> Operation:
         if key in self.operations:
@@ -265,7 +270,8 @@ def _merge(base: dict, profile: dict) -> dict:
     """
     out = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
            for k, v in base.items()}
-    for section in ("verbs", "nouns", "states", "state_groups", "operations"):
+    for section in ("verbs", "nouns", "states", "state_groups", "operations",
+                    "bill_prefixes"):
         over = profile.get(section)
         if not over:
             continue

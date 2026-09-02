@@ -60,10 +60,15 @@ button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
 .tab[aria-selected="true"]{color:var(--accent-ink);border-bottom-color:var(--accent);font-weight:600}
 
 /* ── 三栏 ── */
+/* 三栏各自滚动。用 min-height 的话最长的那栏（85 个类型的左栏）会把整页撑高，
+   中右两栏下方就是大片死白——控制台该是每栏独立滚动。 */
 .panes{display:grid;grid-template-columns:246px minmax(0,1fr) 330px;
-       gap:1px;background:var(--rule);min-height:calc(100vh - 150px)}
-.pane{background:var(--paper);padding:16px;overflow:auto}
-@media (max-width:1080px){.panes{grid-template-columns:1fr}}
+       gap:1px;background:var(--rule);height:calc(100vh - 152px);min-height:520px}
+.pane{background:var(--paper);padding:16px;overflow-y:auto;overflow-x:hidden;min-height:0}
+@media (max-width:1080px){
+  .panes{grid-template-columns:1fr;height:auto}
+  .pane{overflow:visible;max-height:none}
+}
 
 .eyebrow{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
          color:var(--ink-3);font-weight:600;margin-bottom:8px}
@@ -74,6 +79,17 @@ button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
       color:var(--ink-2);background:var(--card)}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .typelist{display:flex;flex-direction:column;gap:1px}
+#idout{margin:7px 0 0}
+#idout .hit{display:block;width:100%;text-align:left;padding:6px 9px;border-radius:5px;
+            border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent-ink);
+            font-size:12.5px;margin-bottom:4px}
+#idout .miss{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin:0}
+#idout .ev{display:block;font-size:10.5px;color:var(--ink-2);margin-top:2px}
+.oprow{display:flex;align-items:baseline;gap:8px;padding:7px 10px;border:1px solid var(--rule);
+       border-radius:6px;background:var(--card);margin-bottom:6px}
+.oprow .zh{font-size:13px} .oprow .own{font-size:11px;color:var(--ink-3)}
+.oprow .start{font-size:10px;padding:1px 6px;border-radius:3px;
+              background:var(--accent-soft);color:var(--accent-ink)}
 .tbtn{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:baseline;
       padding:7px 9px;border-radius:5px;text-align:left;width:100%}
 .tbtn:hover{background:var(--rule-2)}
@@ -178,6 +194,7 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
 <div class="top">
   <h1>金蝶对象台</h1>
   <span class="sub">Ontology Explorer · 以对象为中心的操作面</span>
+  <span class="badge" id="tenant"></span>
   <span class="spacer"></span>
   <div class="counts" id="counts"></div>
 </div>
@@ -185,6 +202,7 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
   <b>本页操作的是本体定义，不连账套。</b>
   状态轨道是<b>模拟</b>——点一个状态，看此刻哪些动作可用、不可用的为什么。
   动作面板给出的是可复制的 <code>kd_act(…)</code> 调用，由你在 MCP 里执行。
+  <b>业务操作</b>那一栏来自<b>示例租户配置</b>，不是你的账套。
 </p>
 
 <div class="tabs" role="tablist">
@@ -196,7 +214,10 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
 <div id="view-obj">
   <div class="panes">
     <aside class="pane">
-      <div class="eyebrow">对象类型</div>
+      <div class="eyebrow">按单号识别</div>
+      <input class="search" id="idq" placeholder="贴一个单据号，如 CGDD000231" autocomplete="off">
+      <div id="idout"></div>
+      <div class="eyebrow" style="margin-top:16px">对象类型</div>
       <input class="search" id="q" placeholder="搜索名称 / 编码 / 别名" autocomplete="off">
       <div class="chips" id="cats"></div>
       <div class="typelist" id="types"></div>
@@ -249,6 +270,11 @@ const byId = Object.fromEntries(D.types.map(t => [t.form_id, t]));
 const CAT_ZH = {bill:'单据', master_data:'基础资料', view:'查询视图', system:'系统对象'};
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+document.getElementById('tenant').textContent =
+  (D.tenant_is_example ? '示例租户 ' : '') + D.tenant;
+document.getElementById('tenant').title = D.tenant_is_example
+  ? '这是仓库里的示例租户配置，不是你的账套——业务操作那一栏展示的是配好之后的样子'
+  : '当前加载的租户配置';
 document.getElementById('counts').innerHTML =
   [['对象类型', D.counts.types], ['动词', D.counts.verbs],
    ['状态', D.counts.states], ['下推链接', D.counts.links]]
@@ -275,6 +301,31 @@ cats.innerHTML = ['', 'bill', 'master_data', 'view', 'system']
 cats.onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return;
   cat = b.dataset.cat; renderList(); };
 document.getElementById('q').oninput = e => { filter = e.target.value.trim().toLowerCase(); renderList(); };
+
+/* 单号识别：按前缀猜类型。前缀由租户的编码规则决定，所以是启发式——
+   命中只说明"很可能是"，措辞上不能说死。 */
+document.getElementById('idq').oninput = e => {
+  const no = e.target.value.trim().toUpperCase(), out = document.getElementById('idout');
+  if (!no) { out.innerHTML = ''; return; }
+  const hits = Object.entries(D.bill_prefixes || {})
+    .filter(([p]) => no.startsWith(p.toUpperCase()))
+    .sort((a, b) => b[0].length - a[0].length);
+  const seen = new Set(), uniq = [];
+  hits.forEach(([p, meta]) => { if (!seen.has(meta.form_id)) { seen.add(meta.form_id); uniq.push([p, meta]); } });
+  out.innerHTML = uniq.length
+    ? uniq.map(([p, meta]) => `<button class="hit" data-id="${meta.form_id}">
+        ${esc(byId[meta.form_id]?.zh || meta.form_id)}　<code style="font-size:11px">${p}…</code>
+        <span class="ev">依据：${esc(meta.evidence || '—')}</span></button>`).join('')
+      + '<p class="miss">按编号前缀推断，<b>未经账套核实</b>。</p>'
+    : `<p class="miss">前缀不在已登记的 ${Object.keys(D.bill_prefixes || {}).length} 条里，认不出类型。
+       这不代表单号有问题——各家编码规则不同，可在 profile 的 bill_prefixes 段补一条。</p>`;
+};
+document.getElementById('idout').onclick = e => {
+  const b = e.target.closest('[data-id]'); if (!b || !byId[b.dataset.id]) return;
+  cur = b.dataset.id; curAction = null;
+  curState = byId[cur].states[0] || null;
+  renderList(); renderCenter(); renderRight();
+};
 
 function renderList() {
   cats.querySelectorAll('[data-cat]').forEach(b => b.setAttribute('aria-pressed', b.dataset.cat === cat));
@@ -336,6 +387,13 @@ function renderCenter() {
         <div class="prop"><span class="k">${esc(p.name)}</span>
         <span class="t">${p.is_lookup ? '关联' : '标量'}</span></div>`).join('')}</div>
     </div>
+    ${(t.operations && t.operations.length) ? `<div class="card">
+      <div class="eyebrow">业务操作 · ${t.operations.length}</div>
+      <p class="hint" style="margin:0 0 8px">本租户已经编排好的流程——有现成的就别自己拼步骤。</p>
+      ${t.operations.map(op => `<div class="oprow"><span class="zh">${esc(op.zh)}</span>
+        ${op.starts_here ? '<span class="start">从这里开始</span>' : ''}
+        <span class="own">${esc(op.owner || '')} · ${op.steps} 步</span></div>`).join('')}
+    </div>` : ''}
     <div class="card">
       <div class="eyebrow">链接 · ${t.links.length}</div>
       <div class="links">${links}</div>
