@@ -11,6 +11,38 @@
 于是 3 个"一站式"复合工具成了**无补偿的 Saga**——中途失败时副作用已落库，代码只返回一段
 `recovery_hint` 文本，把回滚责任交给 LLM 的自觉。
 
+## 0.5 修复状态
+
+审计后已在本仓库落地的修复（`python3 tools/ontology/audit_atomicity.py` 从
+**15 项发现 / 7 项 error** 降到 **5 项 / 0 项 error**）：
+
+| 编号 | 状态 | 做法 |
+|---|---|---|
+| A-3 | ✅ 已修 | 会话失效判定收紧为正则；**只有 HTTP 401 才允许重放写请求**，200+失效改抛 `SessionAmbiguousError` |
+| A-4 | ✅ 已修 | `_login()` 真正持锁 + 双重检查 |
+| A-6 | ✅ 已修 | 抽出 `_prepare_save_model()`，`save_bill` 与复合工具共用字段自愈与顺序防御 |
+| N-1 | ✅ 已修 | 拆分 `workflow_approve` / `workflow_reject`，各自如实标注破坏性 |
+| N-2 | ✅ 已修 | `refresh_metadata` 改为 `readOnly=False, idempotent=True` |
+| N-3 | ✅ 已修 | 三个查询工具 `idempotentHint` 改回 `True` |
+| S-3 | ✅ 已修 | `DOC_LIFECYCLE` 补齐 6 个 execute 系动词的状态定义 |
+| R-1 | ✅ 已修 | 规则改按**动词**匹配，工具集中登记在 `harness/tools.py`，**覆盖率 25% → 100%**，漏登记 = CI 失败 |
+| R-2 | ✅ 已修 | 三处把工具名塞进 `next_action` 的改为动词；`NEXT_ACTION_VOCAB` 由测试守住 |
+| R-3 | ✅ 已修 | `return` → `continue`，并改为收集全部违规而非首个即返回 |
+| R-4 | ✅ 已修 | 契约统一为 `(passed, message)`，docstring 与实现对齐 |
+| R-5 | ✅ 已修 | 后续动词必须**绑定到具体单据**；绑不上时降级为新增的 RULE-006 警告 |
+| R-6 | ✅ 已修 | `opinion` 不再假装被记录，返回 `opinion_persisted: false` + 明确警告 |
+| R-7 | ✅ 已修 | `reject` 拆为独立工具，返回体声明 `bypassed_workflow: true` |
+| P-3 | ✅ 已修 | `error_type` 在 `except` 块内捕获，三处 |
+| P-5 | ✅ 已修 | 复合工具的各步骤共享同一 `trace_id` |
+| A-2 | ⚠️ 缓解 | 底层 API 决定了两种原子性并存；现在**契约随结果返回**（`contract.atomicity` + `atomicity_note`），调用方可据此决定重试策略 |
+| A-1 | ⚠️ 缓解 | 无事务的底层 API 做不到原子；现在中途失败返回结构化 `pending_compensation`（遗留对象 + 建议动作）并落过程审计，可被 `kd_audit(scope='dangling')` 与每日回溯查出。**补偿仍需人执行，不会自动回滚**（自动删单风险更高） |
+| A-5 | ❌ 未修 | 幂等键需要服务端配合 |
+| S-1/S-2 | ◐ 部分 | 底座 `base/registry.yml` 已给出唯一权威状态词表并修正 `D` 的双重定义；legacy 的中文名词表保留以免破坏既有返回体 |
+| L-1/L-3 | ◐ 部分 | 底座有集中链接表并在发请求前校验；legacy 的 5 个 push 工具尚未接入 |
+| L-2 | ❌ 存疑 | 需在真实账套实证 |
+
+新增的约束：RULE-005（复合操作中间态补偿）、RULE-006（身份可绑定性）。
+
 ## 1. 发现汇总
 
 | 级别 | 数量 | 编号 |
