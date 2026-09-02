@@ -42,6 +42,7 @@ def _collect() -> dict:
     o = load(tenant="")
     surf = json.loads(_run("tools/ontology/measure_tool_surface.py", "--both", "--json"))
     audit = json.loads(_run("tools/ontology/audit_atomicity.py", "--json"))
+    conv = json.loads(_run("tools/ontology/measure_convergence.py", "--json"))
     tests = subprocess.run([sys.executable, "-m", "pytest", "tests/", "-q"],
                            capture_output=True, text=True, cwd=ROOT)
     line = [l for l in tests.stdout.strip().splitlines() if "passed" in l or "failed" in l]
@@ -51,6 +52,8 @@ def _collect() -> dict:
         "legacy_tokens": surf["legacy"]["est_tokens"], "legacy_tools": surf["legacy"]["tools"],
         "base_tokens": surf["base"]["est_tokens"], "base_tools": surf["base"]["tools"],
         "findings": len(audit), "errors": sum(1 for f in audit if f["level"] == "error"),
+        "conv_pct": conv["coverage_pct"], "conv_covered": conv["covered"],
+        "conv_total": conv["readonly_tools"],
         "tests": line[-1] if line else "(未取到测试结果)",
         "tests_ok": tests.returncode == 0,
     }
@@ -73,16 +76,21 @@ def render(d: dict) -> str:
 这是对上游 [`WaHaiLong/KingdeeMCP`](https://github.com/WaHaiLong/KingdeeMCP) 的一次独立审计与重构增补。
 **上游 97 个工具全部保留，新旧并存**，现有集成不受影响（唯一行为变更见下）。
 
-### 三个数字
+### 关键指标（均为实测）
 
 | 指标 | 之前 | 现在 |
 |---|---|---|
 | MCP 工具面 `tools/list` | ~{d['legacy_tokens']:,} token（200k 上下文的 {ctx}%） | ~{d['base_tokens']:,} token（**-{pct}%**） |
 | 操作链约束层覆盖率 | 25%（24 个写动词只认 3 个） | **100%**（漏登记 = CI 失败） |
 | 自动审计 error | 7 | **{d['errors']}** |
+| 只读工具可由底座表达 | 0 / {d['conv_total']} | **{d['conv_covered']} / {d['conv_total']}（{d['conv_pct']}%）** |
 
 工具从 {d['legacy_tools']} 个收敛到 {d['base_tools']} 个，而注册表里的名词从 48 长到 **{d['nouns']}** 个——
-**名词是数据不是能力，加名词不涨 token**。
+**名词是数据不是能力**：名词涨了 {d['nouns'] * 100 // 48 - 100}%，底座工具只多了 2 个。
+
+未收敛的 {d['conv_total'] - d['conv_covered']} 个全是 SQL Server 目录探查，**刻意保留** ——
+它们的数据来自数据库系统表而非金蝶 WebAPI，需要另一套凭据，
+折叠进来会让同一个工具横跨两个数据源、两套权限模型。
 
 ### 三层架构
 

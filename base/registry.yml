@@ -754,6 +754,123 @@ nouns:
     default_fields: "FID,FBillNo,FOutDate,FInDate,FDocumentStatus,FStockOrgId.FName,FOutStockId.FName,FInStockId.FName,FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FOutQty,FInQty,FPendingQty"
     legacy_tool: kingdee_query_transfer_pending_detail
 
+# ── 系统对象（走 UserService/RoleService 等专用端点，非 ExecuteBillQuery）──
+# system_endpoint 告诉 kd_query 该走哪个端点；有它就不走通用单据查询。
+# 这类对象只读：没有单据生命周期，也不接受任何写动词。
+  BD_Role:
+    zh: 角色
+    category: system
+    alias: [角色, 权限组]
+    allowed_verbs: [query]
+    system_endpoint: role
+    default_fields: "FRoleID,FName,FNumber,FIsActive"
+    legacy_tool: kingdee_query_role
+
+  BD_User:
+    zh: 用户
+    category: system
+    alias: [用户, 账号, 操作员]
+    allowed_verbs: [query]
+    system_endpoint: user
+    default_fields: "FUserID,FName,FNumber,FDepartment.FName,FIsActive"
+    legacy_tool: kingdee_query_user
+
+  SYS_NumberRule:
+    zh: 编码规则
+    category: system
+    alias: [编码规则, 单据编码规则]
+    allowed_verbs: [query]
+    system_endpoint: number_rule
+    default_fields: "FNumberRuleId,FName,FNumber,FObjectType,FPrefix,FSequenceLength"
+    legacy_tool: kingdee_query_number_rule
+
+  SYS_Permission:
+    zh: 权限
+    category: system
+    alias: [权限, 授权]
+    allowed_verbs: [query]
+    system_endpoint: permission
+    default_fields: "FPermissionId,FName,FNumber,FObjectType"
+    legacy_tool: kingdee_query_permission
+
+  SYS_SequenceRule:
+    zh: 序列规则
+    category: system
+    alias: [序列规则, 流水号规则]
+    allowed_verbs: [query]
+    system_endpoint: sequence
+    default_fields: "FSequenceRuleId,FName,FNumber,FObjectType,FDescription"
+    legacy_tool: kingdee_query_sequence
+
+  SYS_SystemConfig:
+    zh: 系统参数
+    category: system
+    alias: [系统参数, 系统配置]
+    allowed_verbs: [query]
+    system_endpoint: sysconfig
+    default_fields: "FConfigId,FConfigKey,FConfigValue,FDescription,FCategory"
+    legacy_tool: kingdee_query_system_config
+
+  ER_HistoricalLoanBalance:
+    zh: 历史借款余额
+    category: view
+    alias: [借款余额, 历史借款]
+    allowed_verbs: [query]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus"
+    legacy_tool: kingdee_query_loan_balance
+
+  DB_BackupRecord:
+    zh: 数据备份记录
+    category: view
+    alias: [数据备份, 备份记录]
+    allowed_verbs: [query]
+    default_fields: "FID,FBACKUPDATE,FOPERATOR,FBACKUPTYPE,FSTATUS,FBACKUPFILE,FBACKUPSIZE,FREMARK"
+    legacy_tool: kingdee_query_data_backup
+
+  SEC_Permission:
+    zh: 权限变更记录
+    category: view
+    alias: [权限变更, 授权变更]
+    allowed_verbs: [query]
+    default_fields: "FID,FCREATEDATE,FCREATORID,FUSERNAME,FTARGETTYPE,FOBJECTTYPE,FOBJECTID,FOBJECTNAME,FACTION,FPRIVILEGE"
+    legacy_tool: kingdee_query_permission_changes
+
+  # ── 回退表（legacy 工具在主表查不到时改查这些）────────────────
+  # 同一份业务数据在不同账套/版本下表名不同，legacy 工具是"主表失败就换一张"。
+  # 登记它们是为了让 kd_query 也能直接查，而不是把回退逻辑复制进底座——
+  # 底座不做隐式回退：查不到就报错，由调用方决定换哪张，行为才可预期。
+  T_BAS_BackupRecord:
+    zh: 数据备份记录（回退表）
+    category: view
+    allowed_verbs: [query]
+    default_fields: "FID,FBACKUPDATE,FOPERATOR,FBACKUPTYPE,FSTATUS"
+    legacy_tool: kingdee_query_data_backup
+
+  SEC_UserRole:
+    zh: 用户角色关系（权限变更回退表）
+    category: view
+    allowed_verbs: [query]
+    default_fields: "FID,FUSERID,FROLEID,FCREATEDATE"
+    legacy_tool: kingdee_query_permission_changes
+
+  V_SFA_ApprovalRecord:
+    zh: 审批记录视图
+    category: view
+    alias: [审批记录, 审批流水]
+    allowed_verbs: [query]
+    default_fields: "FID,FBILLNO,FFORMID,FAPPROVER,FAPPROVEDATE,FRESULT,FOPINION"
+    legacy_tool: kingdee_query_approval_flow
+
+  Workflow_Instance:
+    zh: 工作流实例
+    category: view
+    alias: [工作流实例, 审批实例]
+    allowed_verbs: [query]
+    default_fields: "FID,FBILLNO,FFORMID,FSTATE,FCREATEDATE"
+    legacy_tool: kingdee_query_approval_flow
+    # 注：审计 R-7 指出 kingdee_workflow_reject 走 unaudit 端点会**绕过工作流引擎**，
+    #     该表不会被更新。要确认审批实例的真实状态，查这张表而不是单据状态。
+
 # ── 状态：唯一权威词表（审计 S-1 / S-2 的对症设计）──────────────
 # 此前 DOC_LIFECYCLE 用中文名、SQL 过滤用字母码，两套互不映射；
 # 且 'D' 同时被划入 pending 与 rejected。这里统一为规范码。
