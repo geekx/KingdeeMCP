@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────
+# 链接（Link）— 抽象层 + 实例层
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  concept: Link
+  definition: >
+    两个名词实例之间被系统持久化的、有方向的业务关系。
+    与"引用"的区别：Link 承载数量守恒与状态约束，改变一端会约束另一端。
+  kinds:
+    - id: push_down
+      zh: 下推（源单 → 目标单）
+      persisted_as: 金蝶 _LK 关联表 + 源单的「关联数量」字段
+      invariant: "sum(下游关联数量) <= 源单数量（勾选控制交货数量时还受上下限约束）"
+      reversible: false        # 无 unpush 动词；只能删除下游单据间接解除
+    - id: workflow_instance
+      zh: 单据 ↔ 审批流实例
+      persisted_as: 工作流引擎实例表
+      issue: "R-7：kingdee_workflow_approve 直接打 audit/unaudit 端点，绕开工作流引擎，该链接不会被更新。"
+    - id: master_reference
+      zh: 单据 → 基础资料
+      persisted_as: 单据字段（FSupplierId / FMaterialId 等）
+      invariant: "被引用的基础资料不应处于 FORBIDDEN 状态"
+      issue: "无任何动词或规则校验此不变量。"
+
+# ── 实例：代码中硬编码的下推链接 ─────────────────────────────
+# 由 extract_ontology.py 自动抽取；hardcoded=true 表示源/目标都写死在函数体内
+hardcoded_push_links:
+  - tool: kingdee_push_stock_transfer
+    line: 6176
+    from: STK_TransferApply
+    to: STK_TransferDirect
+    zh: 调拨申请单 → 直接调拨单
+    verified: unverified
+  - tool: kingdee_push_production_pick
+    line: 6990
+    from: PRD_MO
+    to: PRD_PickMtrl
+    zh: 生产订单 → 生产领料单
+    verified: unverified
+  - tool: kingdee_push_production_stock_in
+    line: 7025
+    from: PRD_PickMtrl
+    to: PRD_Instock
+    zh: 生产领料单 → 生产入库单
+    verified: suspect
+    issue: >
+      L-2【存疑，需在目标账套实证】金蝶标准转换关系中，生产入库单(PRD_Instock)
+      由生产订单(PRD_MO)下推；"领料单→入库单"不是标准链路。若目标环境未配置
+      该转换规则，此工具将恒定失败，且失败信息会指向"转换规则不匹配"而非工具定义错误。
+      本次审计为静态分析，无法访问账套验证——请在真实环境用
+      kingdee_push_bill(form_id=PRD_MO, target_form_id=PRD_Instock) 对照确认。
+
+# ── 实例：以参数形式开放的下推（无约束）─────────────────────
+parameterized_push:
+  - tool: kingdee_push_bill
+    from: "<param:form_id>"
+    to: "<param:target_form_id>"
+  - tool: kingdee_push_and_audit
+    from: "<param:form_id>"
+    to: "<param:target_form_id>"
+  - tool: kingdee_create_lx_billing
+    from: "SAL_SaleOrder | PUR_PurchaseOrder"
+    to: "TRNV_Receipt | TRNV_PaymentSlip"
+    note: 由 kind 参数二选一派发，源/目标成对硬编码。
+
+# ── 文档中提及但未编码的链接 ────────────────────────────────
+documented_only:
+  # 仅存在于 kingdee_push_bill 的 docstring（server.py:3573-3576），
+  # 没有任何数据结构承载，因此无法校验
+  - {from: SAL_SaleOrder,     to: SAL_OUTSTOCK,    zh: 销售订单 → 销售出库单}
+  - {from: PUR_PurchaseOrder, to: STK_InStock,     zh: 采购订单 → 采购入库单}
+  - {from: PUR_PurchaseOrder, to: PUR_ReceiveBill, zh: 采购订单 → 收料通知单}
+  - {from: SAL_SaleOrder,     to: SAL_RETURNSTOCK, zh: 销售订单 → 销售退货单}
+
+gaps:
+  - id: AT-07 / L-1
+    finding: >
+      系统内不存在集中的链接登记表。3 条硬编码 + 2 个自由参数入口 + 4 条只写在
+      docstring 里的关系，分散在 5 个函数体中。因此无法回答"这条下推是否合法"，
+      也无法在调用前拦截一个不存在的转换关系——只能等服务端报错。
+    remedy: >
+      把本文件的 hardcoded_push_links + documented_only 合并为运行期可查的
+      LINK_CATALOG，push 类动词在发请求前校验 (from,to) 是否登记。

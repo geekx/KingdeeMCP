@@ -1,0 +1,85 @@
+# ══════════════════════════════════════════════════════════════════
+# 租户配置 —— 面向业务的操作入口定义
+#
+# 这份文件是给**懂业务的人**填的，不是给工程师填的。
+# 每家的金蝶云星空都做过二开：表单标识不同、操作编码不同、下推关系不同、
+# 字段名不同。与其为每家改一次代码，不如让每家在这里描述自己的差异。
+#
+# 填写指南：profiles/README.md
+# 校验：python3 -m base.validate_profile example-tenant
+# 启用：设环境变量 KINGDEE_TENANT=example-tenant
+# ══════════════════════════════════════════════════════════════════
+
+tenant: example-tenant
+描述: 示例账套。演示二开表单、自定义操作码、自定义下推关系、业务操作入口四类差异。
+
+# ── 一、我们家多出来的单据（二开表单）─────────────────────────────
+# 只写底座没有的，或与底座不同的。没有差异的表单一个字都不用写。
+nouns:
+  PAEZ_CustomInvoice:
+    zh: 客户开票申请单
+    category: bill
+    alias: [开票申请, 开票单, 请票单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, close, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FInvoiceAmount"
+
+  # 也可以只改底座已有表单的一两个字段，其余继承。
+  # 例：我们家的销售订单加了"项目号"，希望默认带出来。
+  SAL_SaleOrder:
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FAllAmount,FProjectNo"
+
+# ── 二、我们家的操作编码和标准不一样（二开动作）───────────────────
+# 整单关闭、作废这类动作的编码随表单而异，底座给的是最常见的那个。
+# 只在不一样时才写。
+verbs:
+  close:
+    endpoint: execute
+    op_number_by_noun:
+      SAL_SaleOrder: YLBillClose        # 我们家销售订单的关闭码是 YLBillClose
+      PAEZ_CustomInvoice: PAEZ_Close    # 二开单自己的关闭码
+
+# ── 三、我们家特有的下推关系 ──────────────────────────────────────
+# 底座不认识的下推，写在这里才允许执行（否则会被 PRE-02 拦下）。
+links:
+  - {from: SAL_SaleOrder, to: PAEZ_CustomInvoice, zh: 销售订单→客户开票申请单, verified: confirmed}
+  - {from: PAEZ_CustomInvoice, to: AR_Receivable, zh: 开票申请→应收单, verified: confirmed}
+
+# ── 四、业务操作入口（这一段最重要）───────────────────────────────
+# 用你们自己的说法给一件事命名，说明它由哪几步组成。
+# 定义好之后，直接说"帮我做『销售开票』"就能用，不必记 form_id 和动词。
+#
+# steps 里每一步只有三种写法：
+#   - {做: 下推, 从: <单据>, 到: <单据>}
+#   - {做: <动词>, 对象: <单据>, 用: <上一步产物|targets>}
+#   - {做: 确认, 问: "..."}          ← 需要人点头才继续
+operations:
+
+  销售开票:
+    zh: 销售开票
+    owner: 财务部
+    desc: 已审核的销售订单 → 生成开票申请 → 提交审核 → 生成应收单。
+    confirm: true                      # 涉及金额，执行前必须让人确认
+    steps:
+      - {做: 确认, 问: "将对这些销售订单生成开票申请并过账应收，确认继续？"}
+      - {做: 下推, 从: SAL_SaleOrder, 到: PAEZ_CustomInvoice}
+      - {做: submit, 对象: PAEZ_CustomInvoice, 用: 上一步产物}
+      - {做: audit,  对象: PAEZ_CustomInvoice, 用: 上一步产物}
+      - {做: 下推, 从: PAEZ_CustomInvoice, 到: AR_Receivable}
+
+  采购收货入库:
+    zh: 采购收货入库
+    owner: 仓储部
+    desc: 已审核采购订单 → 采购入库单 → 提交审核。不含质检。
+    steps:
+      - {做: 下推, 从: PUR_PurchaseOrder, 到: STK_InStock}
+      - {做: submit, 对象: STK_InStock, 用: 上一步产物}
+      - {做: audit,  对象: STK_InStock, 用: 上一步产物}
+
+  关闭超期订单:
+    zh: 关闭超期订单
+    owner: 销售部
+    desc: 对指定的销售订单执行整单关闭（用我们家的 YLBillClose 编码）。
+    confirm: true
+    steps:
+      - {做: 确认, 问: "整单关闭后订单不能再下推发货，确认继续？"}
+      - {做: close, 对象: SAL_SaleOrder, 用: targets}

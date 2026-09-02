@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────
+# 名词（Noun）— 抽象层
+# 实例层：server.py:FORM_CATALOG 共 48 个，快照见 instances.snapshot.json
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  concept: Noun
+  definition: 有独立身份、可被动词作用、其状态可持久化的业务对象类型。
+  identity:
+    primary: form_id            # 金蝶 FormId，如 PUR_PurchaseOrder
+    instance_key: [FID, FBillNo]  # FID 是内码（稳定），FBillNo 是业务编号（可读）
+    warning: >
+      L-3 相关：不同动词要求不同的标识——submit/audit/delete 用 FID，
+      push 用 FBillNo，ExecuteOperation 两者皆可。调用方必须自行在两套
+      标识间转换，而系统未提供 FBillNo→FID 的解析动词。
+
+# ── 名词分类 ─────────────────────────────────────────────────
+categories:
+
+  master_data:
+    zh: 基础资料
+    lifecycle: masterdata_states   # 启用/禁用，无审核流
+    instances: [BD_Material, BD_Customer, BD_Supplier, BD_Department,
+                BD_Empinfo, BD_Stock, BD_Unit, BD_Currency]
+    note: 只有 Forbid/Enable 适用；Submit/Audit 对其无意义，但工具签名不加区分。
+
+  transaction_bill:
+    zh: 业务单据
+    lifecycle: bill_states         # 完整 Save→Submit→Audit 生命周期
+    subdomains:
+      purchase: [PUR_PurchaseOrder, PUR_ReceiveBill, PUR_MRB, PUR_Requisition,
+                 PUR_MRAPP, PUR_Contract, PUR_PriceCategory, PUR_PAT]
+      sourcing: [SVM_InquiryBill, SVM_QuoteBill, SVM_ComparePrice]
+      sales:    [SAL_SaleOrder, SAL_OUTSTOCK, SAL_RETURNSTOCK, SAL_Quotation,
+                 SAL_DELIVERYNOTICE, SAL_RetuenNotice]
+      stock:    [STK_InStock, STK_MisDelivery, STK_Miscellaneous, STK_TransferDirect,
+                 STK_StockCountInput, STK_TransferApply, STK_TRANSFERIN,
+                 STK_TRANSFEROUT, STK_AssembledApp, STK_OutStockApply, STK_StatusConvert]
+      quality:  [QIS_InspectBill]
+      finance:  [AP_Payable, AR_Receivable, TRNV_Receipt, TRNV_PaymentSlip]
+      expense:  [ER_ExpenseRequest, ER_ExpenseReimburse]
+      production: [PRD_MO, PRD_PickMtrl, PRD_Instock]
+
+  query_view:
+    zh: 查询视图
+    lifecycle: null                # 无状态，不可被写动词作用
+    instances: [STK_Inventory, SAL_AvailableQuery]
+    issue: >
+      与业务单据同列于 FORM_CATALOG，但本体上是投影而非实体。
+      当前无任何机制阻止对它们调用 Save/Submit —— 类型系统没有把这条约束表达出来。
+
+# ── 审计缺口 ─────────────────────────────────────────────────
+gaps:
+  - id: L-3
+    finding: >
+      FORM_CATALOG 的 48 个名词与 97 个工具之间没有显式绑定关系。
+      约 60 个 query 工具把 form_id 硬编码在函数体内，catalog 实际只服务于
+      SQL 表名映射和 kingdee_query_pending_approvals 的默认清单。
+      结果：无法回答"名词 X 上可以执行哪些动词"，也无法校验某个动词
+      是否适用于某个名词（例如对基础资料调用 Audit）。
+    remedy: >
+      在 FORM_CATALOG 每个条目上增加 allowed_verbs 与 lifecycle 字段，
+      由 tools/ontology/audit_atomicity.py 在 CI 中校验工具实现与之一致。

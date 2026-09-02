@@ -1004,11 +1004,8 @@ async def _query_metadata(form_id: str, force: bool = False) -> Optional[dict]:
 
             resp = await _do_post(_session_id, client)
 
-            # session 过期则重新登录重试一次
-            if resp.status_code == 401 or (
-                resp.status_code == 200 and
-                ("会话" in resp.text or "session" in resp.text.lower())
-            ):
+            # session 过期则重新登录重试一次（只读操作，重放安全）
+            if _session_expired(resp)[0]:
                 await _login()
                 resp = await _do_post(_session_id, client)
 
@@ -1622,6 +1619,64 @@ def _url(ep_key: str) -> str:
     return SERVER_URL.rstrip("/") + "/" + _EP[ep_key]
 
 
+# ─────────────────────────────────────────────
+# 会话失效判定（审计发现 A-3）
+#
+# 旧实现：`resp.status_code == 200 and ("会话" in text or "session" in text.lower())`
+# 对成功响应的正文做宽泛子串匹配。任何正文里出现 "session"/"会话" 的成功响应
+# —— 例如 kingdee_query_operation_logs / kingdee_query_audit_log 的返回内容 ——
+# 都会被误判为会话失效，进而**重新登录并原样重发整个请求**。
+# 对 save/push 这类无幂等键的写操作，一次误命中就是一张重复单据。
+#
+# 新实现分两层：
+#   1) 判定收紧为明确的会话失效措辞（正则），不再命中任意含 "session" 的正文；
+#   2) 只有 HTTP 401 才允许自动重放写请求 —— 401 表示请求在鉴权层就被拒，
+#      未进入业务处理，重放安全。200 + 会话失效措辞属于"结果不可判定"：
+#      重新登录，但写操作**不重放**，向调用方抛出明确错误要求先查证状态。
+# ─────────────────────────────────────────────
+
+_SESSION_EXPIRED_RE = re.compile(
+    r"会话\s*(信息)?\s*(已)?\s*(失效|超时|过期|丢失)"
+    r"|登录\s*(已)?\s*(超时|失效|过期)"
+    r"|(请|需)\s*重新登录"
+    r"|用户未登录|尚未登录"
+    r"|session\s*(id)?\s*(is\s*)?(timeout|timed\s*out|expired|invalid|lost|not\s*found)"
+    r"|invalid\s+session",
+    re.IGNORECASE,
+)
+
+# 会改变服务端状态的端点：这些端点的请求不可盲目重放
+_WRITE_EPS: frozenset[str] = frozenset({
+    "save", "submit", "audit", "unaudit", "delete",
+    "push", "execute", "cancel_assign",
+})
+
+
+class SessionAmbiguousError(RuntimeError):
+    """写请求遇到「会话失效」但 HTTP 200：请求是否已在服务端生效不可判定。
+
+    这类失败必须与普通失败区分——服务端可能已经建单/过账。
+    调用方在重试前必须先查证对象状态（kingdee_view_bill / kingdee_query_bills）。
+    """
+
+
+def _session_expired(resp) -> tuple[bool, bool]:
+    """判断响应是否表示会话失效。
+
+    Returns:
+        (expired, safe_to_replay)
+        - expired:         是否需要重新登录
+        - safe_to_replay:  请求是否确定未被服务端处理，可原样重放
+    """
+    if getattr(resp, "status_code", 0) == 401:
+        return True, True          # 鉴权层拒绝，未进入业务处理
+    if getattr(resp, "status_code", 0) == 200:
+        text = getattr(resp, "text", "") or ""
+        if _SESSION_EXPIRED_RE.search(text):
+            return True, False     # 已进入服务端，结果不可判定
+    return False, False
+
+
 async def _login() -> str:
     """登录金蝶，返回 SessionId，失败抛异常。
 
@@ -1636,6 +1691,18 @@ async def _login() -> str:
             "未配置 KINGDEE_PASSWORD，无法登录。本服务仅支持账号密码登录"
             "（ValidateUser），请在环境变量中设置金蝶账号的登录密码。"
         )
+    # 审计发现 A-4：_session_lock 此前定义后从未被调用，声明的并发保护不存在。
+    # 双重检查——等到锁时若别的协程已经换了新 SessionId，直接复用，避免重复登录。
+    stale = _session_id
+    async with _get_session_lock():
+        if _session_id and _session_id != stale:
+            return _session_id
+        return await _login_locked()
+
+
+async def _login_locked() -> str:
+    """实际执行 ValidateUser 登录。调用方必须已持有 _get_session_lock()。"""
+    global _session_id
     payload = {"parameters": [ACCT_ID, USERNAME, PASSWORD, LCID]}
     # 💡 REMEMBER: httpx 0.28+ 默认 HTTP/2，金蝶不支持，必须显式传 http1=True，否则全 502
     async with httpx.AsyncClient(timeout=30, proxy=None,
@@ -1695,6 +1762,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
 
         success = False
         error_msg = ""
+        error_kind = ""
         try:
             async with httpx.AsyncClient(timeout=30, proxy=None,
                                           transport=httpx.AsyncHTTPTransport(http1=True)) as client:
@@ -1704,11 +1772,8 @@ async def _post(ep_key: str, payload: Any) -> Any:
 
                 resp = await _do_post(_session_id)
 
-                # session 过期则重新登录重试一次
-                if resp.status_code == 401 or (
-                    resp.status_code == 200 and
-                    ("会话" in resp.text or "session" in resp.text.lower())
-                ):
+                # session 过期则重新登录重试一次（只读操作，重放安全）
+                if _session_expired(resp)[0]:
                     await _login()
                     resp = await _do_post(_session_id)
 
@@ -1717,6 +1782,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
                 return _safe_json(resp)
         except Exception as e:
             error_msg = str(e)[:200]
+            error_kind = type(e).__name__  # P-3：必须在 except 块内取，出块后 e 已被删除
             raise
         finally:
             duration_ms = (time.perf_counter() - start_time) * 1000
@@ -1726,7 +1792,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
                 duration_ms=duration_ms,
                 success=success,
                 result_preview="" if success else error_msg,
-                error_type=type(e).__name__ if not success and 'e' in dir() else "",
+                error_type=error_kind,
             )
 
     # Query 的 payload 已是 dict（由 _query_payload 返回）
@@ -1757,6 +1823,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
 
     success = False
     error_msg = ""
+    error_kind = ""
     try:
         async with httpx.AsyncClient(timeout=30, proxy=None,
                                       transport=httpx.AsyncHTTPTransport(http1=True)) as client:
@@ -1766,11 +1833,8 @@ async def _post(ep_key: str, payload: Any) -> Any:
 
             resp = await _do_post(_session_id)
 
-            # session 过期则重新登录重试一次
-            if resp.status_code == 401 or (
-                resp.status_code == 200 and
-                ("会话" in resp.text or "session" in resp.text.lower())
-            ):
+            # session 过期则重新登录重试一次（只读操作，重放安全）
+            if _session_expired(resp)[0]:
                 await _login()
                 resp = await _do_post(_session_id)
 
@@ -1779,6 +1843,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
             return _safe_json(resp)
     except Exception as e:
         error_msg = str(e)[:200]
+        error_kind = type(e).__name__      # P-3：必须在 except 块内取，出块后 e 已被删除
         raise
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -1789,7 +1854,7 @@ async def _post(ep_key: str, payload: Any) -> Any:
             duration_ms=duration_ms,
             success=success,
             result_preview="" if success else error_msg,
-            error_type=type(e).__name__ if not success and 'e' in dir() else "",
+            error_type=error_kind,
         )
 
 
@@ -1865,6 +1930,7 @@ async def _post_raw(ep_key: str, form_id: str, model: dict,
 
     success = False
     error_msg = ""
+    error_kind = ""
     try:
         async with httpx.AsyncClient(timeout=30, proxy=None,
                                       transport=httpx.AsyncHTTPTransport(http1=True)) as client:
@@ -1880,11 +1946,20 @@ async def _post_raw(ep_key: str, form_id: str, model: dict,
                 },
             )
 
-            if resp.status_code == 401 or (
-                resp.status_code == 200 and
-                ("会话" in resp.text or "session" in resp.text.lower())
-            ):
+            expired, safe_to_replay = _session_expired(resp)
+            if expired:
                 await _login()
+                # 审计发现 A-3：只有 401（鉴权层拒绝、未进入业务处理）才允许重放
+                # 写请求。200 + 会话失效措辞意味着请求可能已经在服务端生效，
+                # 盲目重发会造成重复建单——这里改为抛出可识别的错误，
+                # 要求调用方先查证对象状态再决定是否重试。
+                if not safe_to_replay and ep_key in _WRITE_EPS:
+                    raise SessionAmbiguousError(
+                        f"写操作 {ep_key}({form_id}) 收到 HTTP 200 且正文提示会话失效，"
+                        f"无法判定服务端是否已生效。已重新登录，但**未自动重试**。"
+                        f"请先用 kingdee_view_bill / kingdee_query_bills 查证对象状态，"
+                        f"确认未生效后再重试；切勿直接重发以免重复建单。"
+                    )
                 resp = await client.post(
                     _url(ep_key),
                     content=body_str.encode("utf-8"),
@@ -1899,6 +1974,7 @@ async def _post_raw(ep_key: str, form_id: str, model: dict,
             return _safe_json(resp)
     except Exception as e:
         error_msg = str(e)[:200]
+        error_kind = type(e).__name__      # P-3：必须在 except 块内取，出块后 e 已被删除
         raise
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -1908,7 +1984,7 @@ async def _post_raw(ep_key: str, form_id: str, model: dict,
             duration_ms=duration_ms,
             success=success,
             result_preview="" if success else error_msg,
-            error_type=type(e).__name__ if not success and 'e' in dir() else "",
+            error_type=error_kind,
         )
 
 

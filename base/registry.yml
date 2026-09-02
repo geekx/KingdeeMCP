@@ -1,0 +1,546 @@
+# 本体注册表 —— MCP 底座的唯一事实来源（machine-readable）
+#
+# 由 base/gen_registry.py 从 FORM_CATALOG 生成骨架后人工补全契约字段。
+# 底座的 6 个通用工具全部由本文件驱动：新增一个名词/链接只改这里，不加工具。
+
+version: 1
+
+# ── 动词：契约是一等公民（审计 A-2 的对症设计）──────────────
+verbs:
+  query:
+    zh: 查询
+    kind: read
+    arity: batch                 # single | batch
+    atomicity: atomic            # atomic | per_item | server_defined
+    idempotent: true
+    inverse: null                # 只读，无逆动词概念
+
+  read:
+    zh: 查看单据详情
+    kind: read
+    arity: single
+    atomicity: atomic
+    idempotent: true
+    inverse: null                # 只读，无逆动词概念
+
+  save:
+    zh: 新建或修改
+    kind: write
+    endpoint: save
+    arity: single
+    atomicity: atomic
+    idempotent: false
+    inverse: delete              # 新建的逆是删除；修改无真正的逆（旧值不留存）
+    requires_state: ['NONEXISTENT', 'Z:暂存', 'A:创建']
+
+  submit:
+    zh: 提交
+    kind: write
+    endpoint: submit
+    arity: batch
+    atomicity: per_item
+    idempotent: false
+    inverse: cancel              # 撤销（CancelAssign）把已提交单退回
+    requires_state: ['Z:暂存', 'A:创建']
+    to_state: 'B:审核中'
+
+  audit:
+    zh: 审核
+    kind: write
+    endpoint: audit
+    arity: batch                 # single | batch
+    atomicity: per_item          # atomic | per_item | server_defined
+    idempotent: false
+    inverse: unaudit
+    requires_state: ['B:审核中']
+    to_state: 'C:已审核'
+
+  unaudit:
+    zh: 反审核
+    kind: write
+    endpoint: unaudit
+    arity: batch                 # single | batch
+    atomicity: per_item          # atomic | per_item | server_defined
+    idempotent: false
+    inverse: audit
+    requires_state: ['C:已审核']
+    to_state: 'A:创建'
+
+  delete:
+    zh: 删除
+    kind: write
+    endpoint: delete
+    arity: batch                 # single | batch
+    atomicity: per_item          # atomic | per_item | server_defined
+    idempotent: false
+    inverse: null                # 无逆动词 = destructive，调用前需确认
+    requires_state: ['Z:暂存', 'A:创建']
+    to_state: 'DELETED'
+
+  cancel:
+    zh: 撤销
+    kind: write
+    endpoint: cancel_assign
+    arity: batch
+    atomicity: server_defined
+    idempotent: false
+    inverse: submit              # 撤销后可重新提交
+
+  void:
+    zh: 作废
+    kind: write
+    endpoint: execute
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: null                # 无逆动词 = destructive，调用前需确认
+    requires_state: ['C:已审核']
+    to_state: 'VOID'
+
+  close:
+    zh: 整单关闭
+    kind: write
+    endpoint: execute
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: unclose
+    requires_state: ['C:已审核']
+    to_state: 'CLOSED'
+
+  unclose:
+    zh: 反关闭
+    kind: write
+    endpoint: execute
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: close
+    requires_state: ['CLOSED']
+    to_state: 'C:已审核'
+
+  forbid:
+    zh: 禁用
+    kind: write
+    endpoint: execute
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: enable
+    requires_state: ['ENABLED']
+    to_state: 'FORBIDDEN'
+
+  enable:
+    zh: 启用
+    kind: write
+    endpoint: execute
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: forbid
+    requires_state: ['FORBIDDEN']
+    to_state: 'ENABLED'
+
+  push:
+    zh: 下推
+    kind: write
+    endpoint: push
+    arity: batch                 # single | batch
+    atomicity: server_defined    # atomic | per_item | server_defined
+    idempotent: false
+    inverse: null                # 无逆动词 = destructive，调用前需确认
+    requires_state: ['C:已审核']
+
+# ── 名词：allowed_verbs 让「动词×名词」适用性可校验（MISS-01）────
+nouns:
+  BD_Material:
+    zh: 物料
+    category: master_data
+    alias: [物料, 材料, 商品, 产品]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FMaterialId,FNumber,FName,FSpecification,FUnitID.FName,FMaterialGroup.FName,FDocumentStatus"
+
+  BD_Customer:
+    zh: 客户
+    category: master_data
+    alias: [客户, 客户档案, 客户资料]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FNumber,FName,FShortName,FContact,FPhone,FDocumentStatus"
+
+  BD_Supplier:
+    zh: 供应商
+    category: master_data
+    alias: [供应商, 供应商档案, 厂家, 供货商]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FSupplierId,FNumber,FName,FShortName,FContact,FPhone,FDocumentStatus"
+
+  BD_Department:
+    zh: 部门
+    category: master_data
+    alias: [部门, 组织, 组织架构]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FDeptId,FNumber,FName,FFullName,FParentID.FName"
+
+  BD_Empinfo:
+    zh: 员工
+    category: master_data
+    alias: [员工, 人员, 职员, 用户, 采购员]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FID,FStaffNumber,FName,FDeptId.FName,FDocumentStatus"
+
+  BD_Stock:
+    zh: 仓库
+    category: master_data
+    alias: [仓库, 库房, 仓位, 库存组织]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FStockId,FNumber,FName,FGroup.FName,FStockType.FName,FDocumentStatus"
+
+  BD_Unit:
+    zh: 计量单位
+    category: master_data
+    alias: [单位, 计量单位, 单位组]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FUnitId,FNumber,FName,FType"
+
+  BD_Currency:
+    zh: 币别
+    category: master_data
+    alias: [币别, 货币, 币种]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FCurrencyId,FNumber,FName,FSymbol,FExchangeRateType"
+
+  PUR_PurchaseOrder:
+    zh: 采购订单
+    category: bill
+    alias: [采购订单, 采购单, PO, 采购合同订单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FSupplierId.FNumber,FPurchaseDeptId.FName,FPurchaserId.FName,FTaxAmount,FAllAmount,FMaterialId.FName,FMaterialId.FNumber,FQty,FReceiveQty,FStockInQty"
+
+  PUR_ReceiveBill:
+    zh: 收料通知单
+    category: bill
+    alias: [收料通知, 到货通知, 收料单, 来料通知]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FStockOrgId.FName,FInspectStatus"
+
+  PUR_MRB:
+    zh: 采购退料单
+    category: bill
+    alias: [采购退料, 退货单, 来料不良退货]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FReturnReason,FReturnQty"
+
+  PUR_Requisition:
+    zh: 采购申请单
+    category: bill
+    alias: [采购申请, 申购单, 请购单, 采购需求]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FApplicantDeptId.FName,FTotalAmount"
+
+  PUR_MRAPP:
+    zh: 退料申请单
+    category: bill
+    alias: [退料申请, 退料申请单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FReturnType,FReturnQty"
+
+  PUR_Contract:
+    zh: 采购合同
+    category: bill
+    alias: [采购合同, 合同, 采购协议]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FTotalAmount,FContractStatus"
+
+  PUR_PriceCategory:
+    zh: 采购价目表
+    category: bill
+    alias: [采购价目, 采购价格, 价格资料, 供应商价格]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice,FTaxPrice,FCurrencyId.FName"
+
+  PUR_PAT:
+    zh: 采购调价表
+    category: bill
+    alias: [采购调价, 调价表, 价格调整]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FOldPrice,FNewPrice,FEffectiveDate"
+
+  SVM_InquiryBill:
+    zh: 采购询价单
+    category: bill
+    alias: [询价单, 询价, RFQ, 请求报价]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FExpiryDate"
+
+  SVM_QuoteBill:
+    zh: 供应商报价单
+    category: bill
+    alias: [报价单, 报价, 供应商报价, 报价响应]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice,FQuantity,FDeliveryDate"
+
+  SVM_ComparePrice:
+    zh: 比价单
+    category: bill
+    alias: [比价, 比价单, 价格比较]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FSupplierId.FName,FPrice,FBestSupplier"
+
+  SAL_SaleOrder:
+    zh: 销售订单
+    category: bill
+    alias: [销售订单, 销售单, SO, 销售合同]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesOrgId.FName,FSalesManId.FName,FTotalAmount,FLinkQty,FStockOutQty,FDeliQty"
+
+  SAL_OUTSTOCK:
+    zh: 销售出库单
+    category: bill
+    alias: [销售出库, 出货单, 发货单, 销售发货]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FStockOrgId.FName,FStockId.FName,FOutQty"
+
+  SAL_RETURNSTOCK:
+    zh: 销售退货单
+    category: bill
+    alias: [销售退货, 退货, 客户退货]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FReturnReason,FReturnQty"
+
+  SAL_Quotation:
+    zh: 销售报价单
+    category: bill
+    alias: [销售报价, 报价单, SQ, 销售提案]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesmanId.FName,FTotalAmount,FExpiryDate"
+
+  SAL_DELIVERYNOTICE:
+    zh: 发货通知单
+    category: bill
+    alias: [发货通知, 送货通知, 发货单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FDeliveryDate,FNoticeQty"
+
+  SAL_RetuenNotice:
+    zh: 退货通知单
+    category: bill
+    alias: [退货通知, 退货单, 客户退货通知]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FReturnReason,FReturnQty"
+
+  SAL_AvailableQuery:
+    zh: 可发量查询
+    category: view
+    alias: [可发量, 可用量, 可用库存, 库存可用量]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FAvailableQty,FUnitId.FName"
+
+  STK_InStock:
+    zh: 采购入库单
+    category: bill
+    alias: [采购入库, 入库单, 入库, 来货入库]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FMaterialId.FName,FInQty,FSupplierId.FName"
+
+  STK_MisDelivery:
+    zh: 其他出库单
+    category: bill
+    alias: [其他出库, 杂发, 领料, 生产领料]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FOutQty,FReason"
+
+  STK_Miscellaneous:
+    zh: 其他入库单
+    category: bill
+    alias: [其他入库, 杂收, 盘盈入库]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FInQty,FReason"
+
+  STK_TransferDirect:
+    zh: 直接调拨单
+    category: bill
+    alias: [调拨, 调拨单, 库存调拨, 仓库调拨]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOutId.FName,FStockInId.FName,FMaterialId.FName,FTransferQty"
+
+  STK_Inventory:
+    zh: 即时库存
+    category: view
+    alias: [库存, 即时库存, 库存查询, 现存量]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FStockLocId.FName,FBaseQty,FUnitId.FName"
+
+  STK_StockCountInput:
+    zh: 盘点单
+    category: bill
+    alias: [盘点, 盘点单, 库存盘点, 盘点]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FInspectorId.FName,FStockTakeStatus"
+
+  STK_TransferApply:
+    zh: 调拨申请单
+    category: bill
+    alias: [调拨申请, 调拨单申请]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSendStockId.FName,FReceiveStockId.FName,FMaterialId.FName,FApplyQty"
+
+  STK_TRANSFERIN:
+    zh: 分布式调入单
+    category: bill
+    alias: [调入单, 调拨入库, 调拨接收]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FInQty"
+
+  STK_TRANSFEROUT:
+    zh: 分布式调出单
+    category: bill
+    alias: [调出单, 调拨出库, 调拨发出]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FOutQty"
+
+  STK_AssembledApp:
+    zh: 组装拆卸单
+    category: bill
+    alias: [组装, 拆卸, 组装拆卸, 拆装]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FAssembleType,FMaterialId.FName"
+
+  STK_OutStockApply:
+    zh: 出库申请单
+    category: bill
+    alias: [出库申请, 领料申请]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FMaterialId.FName,FApplyQty"
+
+  STK_StatusConvert:
+    zh: 形态转换单
+    category: bill
+    alias: [形态转换, 库存状态, 状态转换]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FMaterialId.FName,FStatusBefore,FStatusAfter,FConvertQty"
+
+  QIS_InspectBill:
+    zh: 来料检验单
+    category: bill
+    alias: [来料检验, 质检单, 质量检验, IQC, 来料质检]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPassQty,FFailQty,FInspectResult"
+
+  AP_Payable:
+    zh: 应付单
+    category: bill
+    alias: [应付, 应付单, 应付账款, 采购发票]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FAmount,FCloseStatus"
+
+  AR_Receivable:
+    zh: 应收单
+    category: bill
+    alias: [应收, 应收单, 应收账款, 销售发票]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FAmount,FCloseStatus"
+
+  TRNV_Receipt:
+    zh: 二开收款单
+    category: bill
+    alias: [收款单, 二开收款, SKD]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDocumentStatus,F_TRNV_BusinessDate"
+
+  TRNV_PaymentSlip:
+    zh: 二开付款单
+    category: bill
+    alias: [付款单, 二开付款, FKD]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDocumentStatus,F_TRNV_BusinessDate,F_TRNV_Base_hpu"
+
+  PRD_MO:
+    zh: 生产订单
+    category: bill
+    alias: [生产订单, 生产单, MO, 工单, 工单生产]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FUnitId.FName,FQty,FStockInQty,FPickMtrlQty,FPlanStartDate,FPlanFinishDate"
+
+  PRD_PickMtrl:
+    zh: 生产领料单
+    category: bill
+    alias: [生产领料, 领料单, 领料]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FPickQty,FMoBillNo"
+
+  PRD_Instock:
+    zh: 产品入库单
+    category: bill
+    alias: [产品入库, 完工入库, 生产入库]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FInQty,FMoBillNo"
+
+  ER_ExpenseRequest:
+    zh: 费用申请单
+    category: bill
+    alias: [费用申请, 申请单, 事前申请]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FTotalAmount,FExpenseTypeId.FName"
+
+  ER_ExpenseReimburse:
+    zh: 费用报销单
+    category: bill
+    alias: [费用报销, 报销单, 报销, 事后报销]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FTotalReimAmount,FExpenseTypeId.FName"
+
+
+# ── 状态：唯一权威词表（审计 S-1 / S-2 的对症设计）──────────────
+# 此前 DOC_LIFECYCLE 用中文名、SQL 过滤用字母码，两套互不映射；
+# 且 'D' 同时被划入 pending 与 rejected。这里统一为规范码。
+states:
+  "NONEXISTENT": {zh: 不存在,   field: null,             value: null, terminal: false}
+  "Z:暂存":      {zh: 暂存,     field: FDocumentStatus,  value: Z,    terminal: false}
+  "A:创建":      {zh: 创建,     field: FDocumentStatus,  value: A,    terminal: false}
+  "B:审核中":    {zh: 审核中,   field: FDocumentStatus,  value: B,    terminal: false}
+  "C:已审核":    {zh: 已审核,   field: FDocumentStatus,  value: C,    terminal: true}
+  "D:重新审核":  {zh: 重新审核, field: FDocumentStatus,  value: D,    terminal: false}
+  "CLOSED":      {zh: 已关闭,   field: FCloseStatus,     value: null, terminal: false}
+  "VOID":        {zh: 已作废,   field: FCancelStatus,    value: null, terminal: true}
+  "DELETED":     {zh: 已删除,   field: null,             value: null, terminal: true}
+  "ENABLED":     {zh: 已启用,   field: FForbidStatus,    value: A,    terminal: false}
+  "FORBIDDEN":   {zh: 已禁用,   field: FForbidStatus,    value: B,    terminal: false}
+
+# 状态语义分组：修正 S-2（'D' 曾同时属于 pending 与 rejected 两个互斥类）
+state_groups:
+  pending:  ["A:创建", "B:审核中", "D:重新审核"]   # 待处理：含被打回需重新审核的
+  approved: ["C:已审核"]
+  draft:    ["Z:暂存"]
+  # rejected 不是单据状态——工作流驳回要查审批实例，不能用 FDocumentStatus 表达。
+  # 旧代码把 rejected 定义为 D，与 pending 重叠，任何基于它的统计都不可信。
+  rejected: null
+
+# ── 链接：可校验的下推关系表（审计 L-1 / MISS-02 的对症设计）─────
+# verified: confirmed（已实证）| documented（仅文档记载）| suspect（存疑，见 links.yml L-2）
+links:
+  - {from: SAL_SaleOrder,     to: SAL_OUTSTOCK,      zh: 销售订单→销售出库单,   verified: documented}
+  - {from: SAL_SaleOrder,     to: SAL_RETURNSTOCK,   zh: 销售订单→销售退货单,   verified: documented}
+  - {from: SAL_SaleOrder,     to: TRNV_Receipt,      zh: 销售订单→收款单(二开), verified: documented}
+  - {from: PUR_PurchaseOrder, to: STK_InStock,       zh: 采购订单→采购入库单,   verified: documented}
+  - {from: PUR_PurchaseOrder, to: PUR_ReceiveBill,   zh: 采购订单→收料通知单,   verified: documented}
+  - {from: PUR_PurchaseOrder, to: TRNV_PaymentSlip,  zh: 采购订单→付款单(二开), verified: documented}
+  - {from: STK_TransferApply, to: STK_TransferDirect, zh: 调拨申请单→直接调拨单, verified: documented}
+  - {from: PRD_MO,            to: PRD_PickMtrl,      zh: 生产订单→生产领料单,   verified: documented}
+  - {from: PRD_PickMtrl,      to: PRD_Instock,       zh: 生产领料单→生产入库单, verified: suspect,
+     note: "金蝶标准链路中生产入库单由 PRD_MO 下推；本条需在目标账套实证，见 docs/ontology/model/links.yml:L-2"}
+
+# ── 规则：可在发请求前求值的前置条件（审计 MISS-01..03）──────────
+rules:
+  - id: PRE-01
+    kind: precondition
+    zh: 动词必须在名词的 allowed_verbs 内
+    enforced_by: base.ontology.check_verb_applies
+  - id: PRE-02
+    kind: precondition
+    zh: 下推的 (from,to) 必须是已登记的链接
+    enforced_by: base.ontology.check_link
+  - id: PRE-03
+    kind: precondition
+    zh: 动词的 requires_state 必须被满足（需先读取当前状态）
+    enforced_by: base.ontology.check_state
+    note: 未提供 current_state 时降级为警告，不阻断——避免为校验而强制多一次查询。

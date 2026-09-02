@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────
+# 动词（Verb）— 抽象层
+# 实例层由 tools/ontology/extract_ontology.py 从 server.py 自动抽取，
+# 快照见 model/instances.snapshot.json（97 个 MCP 工具 → 20 类动词）。
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  concept: Verb
+  definition: >
+    对一个或多个名词实例施加的、可能改变其状态的操作。
+  atomicity_contract: |
+    每个动词必须声明四项契约，缺一不可：
+      arity        单对象 single / 多对象 batch
+      atomicity    atomic（全成功或全失败） | per_item（逐条，部分成功）
+                   | server_defined（由服务端决定，调用方不可知）
+      idempotent   重放同一请求是否等价于执行一次
+      reversible   有无逆动词；无逆动词 = destructive
+    当前代码 97 个工具没有一个显式声明 arity/atomicity —— 这是 AT-02 的根因。
+
+# ── 动词分类 ─────────────────────────────────────────────────
+classes:
+
+  read:
+    description: 不改变任何状态，可无限重放
+    verbs: [Query, Read, Discover, Validate, Introspect]
+    contract: {arity: batch, atomicity: atomic, idempotent: true, reversible: n/a}
+    instances_count: 72
+    exceptions:
+      - verb: Validate
+        tool: kingdee_validate_bill
+        issue: >
+          N-4：标注 readOnly=True，但会触发元数据拉取并写进程内全局
+          _METADATA_CACHE。对金蝶是只读，对 MCP 进程不是。
+      - verb: Refresh
+        tool: kingdee_refresh_metadata
+        issue: "AT-03：readOnly=True 与 idempotent=False 互相矛盾。"
+
+  lifecycle_write:
+    description: 沿单据主生命周期推进状态
+    verbs: [Save, Submit, Audit, Unaudit, Delete]
+    contract: {arity: batch, atomicity: per_item, idempotent: false, reversible: partial}
+    evidence: "server.py:3067-3080 等，逐条 for 循环 + succeeded/failed 分栏返回"
+    note: Save 无逆动词（改回原值不等于回滚）；Audit↔Unaudit 互逆；Delete 不可逆。
+
+  standard_action:
+    description: 走 ExecuteOperation / CancelAssign 端点的标准动作
+    verbs: [Cancel, Void, Close, Unclose, Forbid, Enable]
+    contract: {arity: batch, atomicity: server_defined, idempotent: false, reversible: partial}
+    evidence: 'server.py:3331-3335，business["Ids"] = ",".join(params.bill_ids)'
+    issue: >
+      AT-02：与 lifecycle_write 同样接收 bill_ids，原子性级别却完全不同，
+      且返回体不含 per-id 结果。失败后调用方无法知道哪些 id 已生效。
+
+  link_write:
+    description: 由源单生成下游单据，产生 Link 实例
+    verbs: [Push]
+    contract: {arity: batch, atomicity: server_defined, idempotent: false, reversible: false}
+    issue: >
+      A-5：无幂等键。重复 Push 会重复生成下游单据；金蝶靠"关联数量 >= 订单数量"
+      兜底，但草稿阶段不计入关联数量，可以穿透。
+
+  composite:
+    description: 一次调用内顺序执行多个写动词
+    verbs: [Composite]
+    instances: [kingdee_create_and_audit, kingdee_push_and_audit, kingdee_create_lx_billing]
+    contract: {arity: single, atomicity: none, idempotent: false, reversible: false}
+    issue: >
+      AT-01：这是无补偿 Saga。中途失败时前序副作用已落库，代码只返回
+      recovery_hint 文本字符串，把补偿责任推给 LLM，且不保证 LLM 会执行。
+      本体上它们不是动词，是"未声明事务边界的动词序列"。
+
+  overloaded:
+    description: 一个工具名派发到多个语义不同的动词
+    instances:
+      - tool: kingdee_workflow_approve
+        dispatches_to: {approve: Audit, reject: Unaudit}
+        issue: >
+          R-7 + AT-03：reject 实际执行 unaudit（反审核），与工作流"驳回"是不同语义，
+          且绕过工作流引擎；同时 kingdee_unaudit_bills 标 destructive=True，
+          此处标 destructive=False，同一操作两套破坏性声明。
+      - tool: kingdee_workflow_approve
+        field: opinion
+        issue: "R-6：审批意见被接收但从不发送给金蝶，只在响应里回显 —— 静默丢失。"

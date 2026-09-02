@@ -12,8 +12,11 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-# 失败日志文件路径
-FAILURE_LOG_PATH = os.path.join(
+# 失败日志文件路径。
+# 默认写在仓库内的 examples/ 下，但那份文件是**被 git 追踪的示例数据**——
+# 测试或本地跑一次就会往里追加，污染工作区并可能被误提交。
+# 因此允许用环境变量改写；测试与 CI 应指向临时目录。
+FAILURE_LOG_PATH = os.environ.get("KINGDEE_FAILURE_LOG") or os.path.join(
     os.path.dirname(__file__), "..", "examples", "failure_log.jsonl"
 )
 

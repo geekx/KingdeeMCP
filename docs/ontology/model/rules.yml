@@ -1,0 +1,142 @@
+# ─────────────────────────────────────────────────────────────
+# 规则（Rule）— 抽象层 + 实例层
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  concept: Rule
+  definition: >
+    对「名词×动词×状态×链接」组合的可判定约束。规则必须能在某个时点被求值为
+    通过/违反，且必须指明由谁在何时执行。
+  taxonomy:
+    - id: precondition
+      zh: 前置条件
+      evaluated: 动词执行前
+      enforcer: 客户端（MCP）或服务端（金蝶）
+    - id: invariant
+      zh: 不变量
+      evaluated: 任意时刻
+      enforcer: 服务端
+    - id: postcondition
+      zh: 后置条件
+      evaluated: 动词执行后
+      enforcer: 客户端
+    - id: chain
+      zh: 操作链约束
+      evaluated: 整条操作序列结束时
+      enforcer: harness/rules.py（离线，CI）
+      warning: >
+        chain 类规则是「事后检查」不是「事前拦截」——它在 CI 里看历史日志，
+        无法阻止运行期产生中间态。当前 harness 的 4 条规则全部属于此类，
+        因此 AT-01 的无补偿 Saga 在运行期完全不受约束。
+
+# ── 实例：金蝶服务端强制的规则（代码只能观察，不能改变）──────
+server_enforced:
+  - id: SRV-01
+    kind: precondition
+    zh: 下推要求源单已审核且未关闭、业务状态正常
+    applies_to: {verb: Push}
+    evidence: server.py:3585-3590（docstring）
+    client_check: none          # MCP 端不预校验，直接发请求等报错
+  - id: SRV-02
+    kind: invariant
+    zh: 采购订单关联数量 >= 订单数量时无法下推收料单/入库单
+    applies_to: {verb: Push, noun: PUR_PurchaseOrder}
+    evidence: server.py:3583-3588
+    client_check: none
+  - id: SRV-03
+    kind: precondition
+    zh: 仅暂存/创建状态可删除；已提交/已审核需先反审核
+    applies_to: {verb: Delete}
+    evidence: server.py:3167（docstring）
+    client_check: none
+
+# ── 实例：客户端错误模式库（反馈层，18 条）──────────────────
+client_error_patterns:
+  source: server.py:KNOWN_ERROR_PATTERNS
+  count: 18
+  with_next_action: 7
+  keys: [字段不存在, 不能为空, 已被其他用户修改, 关联数量, 基础资料, 已审核, 已存在]
+  kind: postcondition
+  note: >
+    这是「错误发生后的解释与建议」，不是约束。它把服务端报错翻译成
+    reason/suggestion 供 LLM 自愈，本体上属于反馈层而非规则层。
+
+# ── 实例：harness 操作链规则（4 条）+ 审计发现 ───────────────
+chain_rules:
+  source: harness/rules.py
+  rules:
+    - id: RULE-001
+      zh: 生命周期完整性（写操作必须走完 Save→Submit→Audit）
+      severity: error
+      matches_tools: [kingdee_save_bill, kingdee_push_bill, kingdee_submit_bills]
+      findings:
+        - id: R-1 / AT-05
+          issue: >
+            工具名以字符串硬编码匹配，只认 3 个工具。24 个写动词中 18 个
+            不被任何规则点名——含全部 3 个复合工具、全部 5 个 push 变体、
+            4 个 save 变体、6 个 execute 系动作。规则覆盖率 25%。
+        - id: R-2 / AT-06
+          issue: >
+            用 `kingdee_{next_action.replace('+','_').split('_')[0]}_bills`
+            反推后继工具名（rules.py:87）。当 next_action 取值为
+            "kingdee_submit_bills + kingdee_audit_bills"（server.py:7005, 7040）
+            或 "kingdee_audit_production_orders"（server.py:6953）时
+            反推得到 "kingdee_kingdee_bills" —— 不存在的工具，规则永远匹配不到，
+            对这两个工具恒定误报"操作链不完整"。
+        - id: R-3
+          issue: >
+            rules.py:80 `if not fid: return True, ""` 用 return 代替 continue。
+            操作链中第一个无法追踪 fid 的节点会让整条规则提前退出，
+            其后所有节点不再检查 —— 漏报。
+    - id: RULE-002
+      zh: Push 操作链完整性（下推产物必须提交+审核）
+      severity: error
+      matches_tools: [kingdee_push_bill]
+      findings:
+        - id: R-5
+          issue: >
+            rules.py:120-129 只要链路后面出现过任意一次 submit 和任意一次 audit
+            就判定通过，不校验它们作用的是不是 push 生成的目标单。
+            对无关单据的 submit/audit 会让规则误判通过 —— 漏报。
+        - id: AT-05
+          issue: 只认 kingdee_push_bill，漏掉另外 4 个 push 动词。
+    - id: RULE-003
+      zh: 错误恢复检查（失败后必须有修正动作）
+      severity: error
+      findings:
+        - issue: >
+            "修正动作"定义为"调用了不同工具，或同工具但参数不同"。
+            一次无意义的查询即可满足，约束强度接近于零。
+    - id: RULE-004
+      zh: 无效重复查询
+      severity: warning
+
+  contract_defect:
+    id: R-4
+    zh: 规则返回值语义与文档相反
+    evidence: "harness/rules.py:23 vs 247-255"
+    detail: >
+      HarnessRule.check 的 docstring 声明"返回 (violated: bool, message)"，
+      但全部 4 个实现返回 True 表示「通过」，validate_operation_chain 里写作
+      `violated, message = rule.check(nodes); if not violated: violations.append(...)`。
+      变量名与实际语义颠倒。新增规则时按文档写就会全盘反向，且不会报错。
+
+# ── 缺失的规则（本体上应存在但代码中没有）───────────────────
+missing:
+  - id: MISS-01
+    kind: precondition
+    zh: 动词-名词适用性（不应对基础资料调用 Submit/Audit，不应对查询视图调用任何写动词）
+  - id: MISS-02
+    kind: precondition
+    zh: 链接合法性（Push 前校验 (from,to) 是否为已登记的转换关系）
+  - id: MISS-03
+    kind: invariant
+    zh: 引用完整性（单据不得引用处于 FORBIDDEN 状态的基础资料）
+  - id: MISS-04
+    kind: postcondition
+    zh: 状态确认（写动词返回 success 后应回读对象状态，确认 state_to 与声明一致）
+    note: 当前 next_action/tip 直接断言状态已迁移，从未回读验证。
+  - id: MISS-05
+    kind: chain
+    zh: 补偿完备性（复合动词中途失败后，必须存在一条补偿记录或显式接受中间态）
+    note: 这是 AT-01 的对症规则；已由 tools/ontology/operation_audit.py:dangling_traces() 在运行期实现。

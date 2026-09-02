@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────
+# 状态（State）— 抽象层 + 实例层
+#
+# 审计发现 S-1/S-2/AT-04：当前代码里状态有两套互不映射的词表——
+#   (a) server.py:DOC_LIFECYCLE 用中文名（草稿/待审核/已审核/已删除/源单/目标单草稿）
+#   (b) SQL 过滤用金蝶字母码 FDocumentStatus ∈ {A,B,C,D,Z}
+# 且 'D' 同时被划入 pending 与 rejected 两个互斥语义类。
+# 本文件给出唯一权威状态词表，(a)(b) 都应向它对齐。
+# ─────────────────────────────────────────────────────────────
+
+meta:
+  concept: State
+  definition: >
+    对象在其生命周期中的一个可观测、可持久化的构型。状态必须满足三条：
+    (1) 可从服务端读回，不能只存在于内存或推断中；
+    (2) 互斥——任一时刻对象恰好处于一个状态；
+    (3) 只能由动词（Verb）改变，不能由查询改变。
+  identity: code            # 规范码，形如 "C:已审核"
+  authority: 金蝶 FDocumentStatus / FForbidStatus 字段的实测值
+
+# ── 单据状态（Bill）─────────────────────────────────────────
+bill_states:
+  - code: "NONEXISTENT"
+    zh: 不存在
+    kingdee: null
+    note: 建单前的隐式起点。DOC_LIFECYCLE 用 "草稿" 覆盖了它，导致 save 的 from/to 都是"草稿"，无法区分新建与修改。
+    terminal: false
+  - code: "Z:暂存"
+    zh: 暂存
+    kingdee: "FDocumentStatus = 'Z'"
+    note: Save 后的落地状态。当前 DOC_LIFECYCLE 缺失此状态（S-4）。
+    terminal: false
+  - code: "A:创建"
+    zh: 创建
+    kingdee: "FDocumentStatus = 'A'"
+    terminal: false
+  - code: "B:审核中"
+    zh: 审核中
+    kingdee: "FDocumentStatus = 'B'"
+    note: Submit 后的状态。DOC_LIFECYCLE 称其为"待审核"。
+    terminal: false
+  - code: "C:已审核"
+    zh: 已审核
+    kingdee: "FDocumentStatus = 'C'"
+    note: 业务生效状态，也是下推（Push）的前置条件。
+    terminal: true
+  - code: "D:重新审核"
+    zh: 重新审核
+    kingdee: "FDocumentStatus = 'D'"
+    note: >
+      S-2：server.py:4739 把 D 归入 pending，4743 又把 D 定义为 rejected。
+      二者互斥却共用同一码，任何基于 status 参数的查询结果都不可信。
+      D 的真实语义是"审核被打回、需重新走审核"，应归入 pending，
+      rejected 需要另找依据（工作流实例状态，而非单据状态）。
+    terminal: false
+
+# ── 业务状态（与单据状态正交，可叠加）───────────────────────
+business_states:
+  - code: "CLOSED"
+    zh: 已关闭
+    kingdee: "FCloseStatus"
+    changed_by: [Close, Unclose]
+    note: AT-04：close/unclose 走 execute 端点，DOC_LIFECYCLE 无定义，_result_status 返回 next_action=null，等价于谎称"流程完成"。
+  - code: "VOID"
+    zh: 已作废
+    kingdee: "FCancelStatus"
+    changed_by: [Void]
+    terminal: true
+  - code: "DELETED"
+    zh: 已删除
+    kingdee: null
+    changed_by: [Delete]
+    terminal: true
+    note: 物理删除，不可逆，仅 Z/A 状态可达。
+
+# ── 基础资料状态 ─────────────────────────────────────────────
+masterdata_states:
+  - code: "ENABLED"
+    zh: 已启用
+    kingdee: "FForbidStatus = 'A'"
+    changed_by: [Enable]
+  - code: "FORBIDDEN"
+    zh: 已禁用
+    kingdee: "FForbidStatus = 'B'"
+    changed_by: [Forbid]
+
+# ── 未定义状态（审计缺口）───────────────────────────────────
+undefined_but_reachable:
+  # 这些状态在运行期真实可达，但代码里没有任何一处定义或断言它们
+  - reached_by: kingdee_cancel_bills
+    note: CancelAssign 撤销后的状态取决于表单，代码未定义也未查证。
+  - reached_by: "复合工具中途失败"
+    note: >
+      AT-01：create_and_audit 停在 submit 失败时，单据处于 "Z:暂存 且已被一次失败的
+      Submit 触碰"。这个中间态不在任何词表里，也无法从返回体判定——
+      halted_at 只说明卡在哪一步，不说明对象现在是什么状态。

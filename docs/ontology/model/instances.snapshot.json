@@ -1,0 +1,2408 @@
+{
+  "nouns": {
+    "BD_Material": {
+      "name": "物料",
+      "alias": [
+        "物料",
+        "材料",
+        "商品",
+        "产品"
+      ],
+      "desc": "企业采购、生产、销售的最小存货单位，是供应链和财务核算的基础。",
+      "fields": "FMaterialId,FNumber,FName,FSpecification,FUnitID.FName,FMaterialGroup.FName,FDocumentStatus",
+      "db_tables": [
+        "T_BD_MATERIAL",
+        "T_BD_MATERIALENTRY"
+      ]
+    },
+    "BD_Customer": {
+      "name": "客户",
+      "alias": [
+        "客户",
+        "客户档案",
+        "客户资料"
+      ],
+      "desc": "企业销售业务中的购买方（下游）。",
+      "fields": "FNumber,FName,FShortName,FContact,FPhone,FDocumentStatus",
+      "db_tables": [
+        "T_BD_CUSTOMER"
+      ]
+    },
+    "BD_Supplier": {
+      "name": "供应商",
+      "alias": [
+        "供应商",
+        "供应商档案",
+        "厂家",
+        "供货商"
+      ],
+      "desc": "企业采购业务中的供应方（上游）。",
+      "fields": "FSupplierId,FNumber,FName,FShortName,FContact,FPhone,FDocumentStatus",
+      "db_tables": [
+        "T_BD_SUPPLIER"
+      ]
+    },
+    "BD_Department": {
+      "name": "部门",
+      "alias": [
+        "部门",
+        "组织",
+        "组织架构"
+      ],
+      "desc": "企业内部组织单元，用于业务归属和权限控制。",
+      "fields": "FDeptId,FNumber,FName,FFullName,FParentID.FName",
+      "db_tables": [
+        "T_BD_DEPARTMENT"
+      ]
+    },
+    "BD_Empinfo": {
+      "name": "员工",
+      "alias": [
+        "员工",
+        "人员",
+        "职员",
+        "用户",
+        "采购员"
+      ],
+      "desc": "企业职员资料，常用于采购员、销售员等业务角色指定。",
+      "fields": "FID,FStaffNumber,FName,FDeptId.FName,FDocumentStatus",
+      "db_tables": [
+        "T_BD_EMPINFO"
+      ]
+    },
+    "BD_Stock": {
+      "name": "仓库",
+      "alias": [
+        "仓库",
+        "库房",
+        "仓位",
+        "库存组织"
+      ],
+      "desc": "物料存储位置，是出入库和库存管理的核心维度。",
+      "fields": "FStockId,FNumber,FName,FGroup.FName,FStockType.FName,FDocumentStatus",
+      "db_tables": [
+        "T_BD_STOCK"
+      ]
+    },
+    "BD_Unit": {
+      "name": "计量单位",
+      "alias": [
+        "单位",
+        "计量单位",
+        "单位组"
+      ],
+      "desc": "物料数量的计量标准，如个、件、箱、吨等。",
+      "fields": "FUnitId,FNumber,FName,FType",
+      "db_tables": [
+        "T_BD_UNIT"
+      ]
+    },
+    "BD_Currency": {
+      "name": "币别",
+      "alias": [
+        "币别",
+        "货币",
+        "币种"
+      ],
+      "desc": "业务交易的货币类型，如人民币、美元等。",
+      "fields": "FCurrencyId,FNumber,FName,FSymbol,FExchangeRateType",
+      "db_tables": [
+        "T_BD_CURRENCY"
+      ]
+    },
+    "PUR_PurchaseOrder": {
+      "name": "采购订单",
+      "alias": [
+        "采购订单",
+        "采购单",
+        "PO",
+        "采购合同订单"
+      ],
+      "desc": "企业与供应商的采购协议，记录货物规格、价格、交货条件，是采购业务的核心单据。与收料通知单、采购入库单、退料申请单有上下游关联关系。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FSupplierId.FNumber,FPurchaseDeptId.FName,FPurchaserId.FName,FTaxAmount,FAllAmount,FMaterialId.FName,FMaterialId.FNumber,FQty,FReceiveQty,FStockInQty",
+      "db_tables": [
+        "T_PUR_POORDER",
+        "T_PUR_POORDERENTRY"
+      ],
+      "business_rules": {
+        "FReceiveQty": "累计收料数量（收料单审核时累加，反审核时扣减）",
+        "FStockInQty": "累计入库数量（入库单审核时累加，反审核时扣减）",
+        "FLinkQty [需启用供应链]": "关联数量 = 累计收料数量 + 累计入库数量，>=订单数量时无法下推",
+        "FBusinessClose [需启用供应链]": "业务关闭状态（A=正常 B=业务关闭）",
+        "FFreezeStatus [需启用供应链]": "冻结状态（A=正常 B=冻结）",
+        "FTerminateStatus [需启用供应链]": "终止状态（A=正常 B=终止）",
+        "FDlyCntl_Low [需启用供应链]": "交货下限，勾选控制交货数量后生效",
+        "FDlyCntl_High [需启用供应链]": "交货上限，勾选控制交货数量后生效",
+        "FCloseStatus [需启用供应链]": "整单关闭状态（A=未关闭 B=已关闭）",
+        "下推收料通知单": "单据状态=已审核 + 关闭状态=未关闭 + 业务状态=正常 + 关联数量<订单数量",
+        "下推采购入库单": "单据状态=已审核 + 关闭状态=未关闭 + 业务状态=正常 + 关联数量<订单数量 + 来料检验=未勾选",
+        "交货数量控制 [需启用供应链]": "勾选后：关联数量>=交货下限无法下推；关联数量+本次>交货上限目标单据无法保存",
+        "业务关闭条件 [需启用供应链]": "累计入库数量>=交货下限时，该行自动业务关闭；<交货下限自动反关闭",
+        "冻结/终止限制 [需启用供应链]": "冻结或终止的分录行只允许查看、反冻结/反终止、打印、引入引出",
+        "预付关联": "采购订单被付款单关联后，不可反审核"
+      }
+    },
+    "PUR_ReceiveBill": {
+      "name": "收料通知单",
+      "alias": [
+        "收料通知",
+        "到货通知",
+        "收料单",
+        "来料通知"
+      ],
+      "desc": "供应商发货到货后创建的通知单，用于来料检验和入库准备。可直接下推采购入库单；若物料勾选来料检验，则入库必须经由收料单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FStockOrgId.FName,FInspectStatus",
+      "db_tables": [
+        "T_PUR_RECEIVEBILL",
+        "T_PUR_RECEIVEBILLENTRY"
+      ],
+      "business_rules": {
+        "来料检验": "物料勾选来料检验时，入库必须先收料再检验，无法直接从订单下推入库单",
+        "审核更新": "收料单审核时，累加采购订单【累计收料数量】；反审核时扣减",
+        "下推入库": "可下推采购入库单；下推时入库单日期须在最早/最晚交货时间内"
+      }
+    },
+    "PUR_MRB": {
+      "name": "采购退料单",
+      "alias": [
+        "采购退料",
+        "退货单",
+        "来料不良退货"
+      ],
+      "desc": "供应商供货存在质量问题时，向供应商退货的单据。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FReturnReason,FReturnQty",
+      "db_tables": [
+        "T_PUR_MRB",
+        "T_PUR_MRBENTRY"
+      ],
+      "business_rules": {
+        "退料前提": "采购订单【检验可退数量】或【库存可退数量】>0 时才可发起退料",
+        "补料方式": "与采购订单关联的退料单【补料方式】必须为按原单补料"
+      }
+    },
+    "PUR_Requisition": {
+      "name": "采购申请单",
+      "alias": [
+        "采购申请",
+        "申购单",
+        "请购单",
+        "采购需求"
+      ],
+      "desc": "企业内部各需求部门发起的采购需求，是采购流程的起点。可下推生成采购订单、采购询价单等。审核后流转至采购部门执行。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FApplicantDeptId.FName,FTotalAmount",
+      "db_tables": [
+        "T_PUR_REQUISITION",
+        "T_PUR_REQUISITIONENTRY"
+      ],
+      "business_rules": {
+        "流转方向": "采购申请单 → 采购订单 或 采购询价单（RFQ）",
+        "单人审核": "同一采购员同一天只能审核一张采购申请单"
+      }
+    },
+    "PUR_MRAPP": {
+      "name": "退料申请单",
+      "alias": [
+        "退料申请",
+        "退料申请单"
+      ],
+      "desc": "库存物料需要退还给供应商时，发起的退料申请。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FReturnType,FReturnQty",
+      "db_tables": [
+        "T_PUR_MRAPP",
+        "T_PUR_MRAPPDISENTRY"
+      ]
+    },
+    "PUR_Contract": {
+      "name": "采购合同",
+      "alias": [
+        "采购合同",
+        "合同",
+        "采购协议"
+      ],
+      "desc": "与供应商签订的框架采购协议，可关联具体采购订单执行。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FTotalAmount,FContractStatus",
+      "db_tables": [
+        "T_PUR_CONTRACT"
+      ]
+    },
+    "PUR_PriceCategory": {
+      "name": "采购价目表",
+      "alias": [
+        "采购价目",
+        "采购价格",
+        "价格资料",
+        "供应商价格"
+      ],
+      "desc": "供应商对特定物料的定价清单，采购订单可直接引用价目表价格。",
+      "fields": "FID,FBillNo,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice,FTaxPrice,FCurrencyId.FName",
+      "db_tables": [
+        "T_PUR_PRICECATEGORY",
+        "T_PUR_PRICECATEGORYENTRY"
+      ]
+    },
+    "PUR_PAT": {
+      "name": "采购调价表",
+      "alias": [
+        "采购调价",
+        "调价表",
+        "价格调整"
+      ],
+      "desc": "调整采购价目表中物料价格的单据，有生效日期控制。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FOldPrice,FNewPrice,FEffectiveDate",
+      "db_tables": [
+        "T_PUR_PAT",
+        "T_PUR_PATENTRY"
+      ]
+    },
+    "SVM_InquiryBill": {
+      "name": "采购询价单",
+      "alias": [
+        "询价单",
+        "询价",
+        "RFQ",
+        "请求报价"
+      ],
+      "desc": "向供应商发起采购询价（Request for Quotation），收集报价信息。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FExpiryDate",
+      "db_tables": [
+        "T_SVM_INQUIRYBILL",
+        "T_SVM_INQUIRYBILLENTRY"
+      ]
+    },
+    "SVM_QuoteBill": {
+      "name": "供应商报价单",
+      "alias": [
+        "报价单",
+        "报价",
+        "供应商报价",
+        "报价响应"
+      ],
+      "desc": "供应商对询价单的响应，包含物料价格、货期等信息。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice,FQuantity,FDeliveryDate",
+      "db_tables": [
+        "T_SVM_QUOTEBILL",
+        "T_SVM_QUOTEBILLENTRY"
+      ]
+    },
+    "SVM_ComparePrice": {
+      "name": "比价单",
+      "alias": [
+        "比价",
+        "比价单",
+        "价格比较"
+      ],
+      "desc": "对多个供应商报价进行比价分析，辅助采购决策。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FSupplierId.FName,FPrice,FBestSupplier",
+      "db_tables": [
+        "T_SVM_COMPAREPRICE"
+      ]
+    },
+    "SAL_SaleOrder": {
+      "name": "销售订单",
+      "alias": [
+        "销售订单",
+        "销售单",
+        "SO",
+        "销售合同"
+      ],
+      "desc": "企业与客户的销售协议，记录销售货物、价格、交货条件。可下推生成销售出库单、销售退货单、发货通知单等。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesOrgId.FName,FSalesManId.FName,FTotalAmount,FLinkQty,FStockOutQty,FDeliQty",
+      "db_tables": [
+        "T_SAL_SALEORDER",
+        "T_SAL_SALEORDERENTRY"
+      ],
+      "business_rules": {
+        "FLinkQty": "关联数量 = 已出库数量 + 已关联数量",
+        "FStockOutQty": "累计出库数量（销售出库单审核时累加）",
+        "FDeliQty": "累计发货数量",
+        "关闭条件": "累计出库数量 >= 订单数量时自动行关闭",
+        "冻结/终止": "冻结或终止的分录行不允许编辑和关联操作"
+      }
+    },
+    "SAL_OUTSTOCK": {
+      "name": "销售出库单",
+      "alias": [
+        "销售出库",
+        "出货单",
+        "发货单",
+        "销售发货"
+      ],
+      "desc": "销售订单下推或手工创建的发货单据，确认货物出库并更新库存。审核时自动更新销售订单的累计出库数量。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FStockOrgId.FName,FStockId.FName,FOutQty",
+      "db_tables": [
+        "T_SAL_OUTSTOCK",
+        "T_SAL_OUTSTOCKENTRY"
+      ],
+      "business_rules": {
+        "审核更新": "审核时累加销售订单【累计出库数量】；反审核时扣减",
+        "可发量控制": "可发量不足时无法出库（勾选控制可发量时）"
+      }
+    },
+    "SAL_RETURNSTOCK": {
+      "name": "销售退货单",
+      "alias": [
+        "销售退货",
+        "退货",
+        "客户退货"
+      ],
+      "desc": "客户因质量问题等原因退货的单据，审核时更新原销售订单的退货数量。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FReturnReason,FReturnQty",
+      "db_tables": [
+        "T_SAL_RETURNSTOCK",
+        "T_SAL_RETURNSTOCKENTRY"
+      ]
+    },
+    "SAL_Quotation": {
+      "name": "销售报价单",
+      "alias": [
+        "销售报价",
+        "报价单",
+        "SQ",
+        "销售提案"
+      ],
+      "desc": "向客户提供的商品或服务价格方案，可作为销售订单的参考价格。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesmanId.FName,FTotalAmount,FExpiryDate",
+      "db_tables": [
+        "T_SAL_QUOTATION",
+        "T_SAL_QUOTATIONENTRY"
+      ]
+    },
+    "SAL_DELIVERYNOTICE": {
+      "name": "发货通知单",
+      "alias": [
+        "发货通知",
+        "送货通知",
+        "发货单"
+      ],
+      "desc": "销售出库前的发货准备单据，可下推生成销售出库单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FDeliveryDate,FNoticeQty",
+      "db_tables": [
+        "T_SAL_DELIVERYNOTICE",
+        "T_SAL_DELIVERYNOTICEENTRY"
+      ]
+    },
+    "SAL_RetuenNotice": {
+      "name": "退货通知单",
+      "alias": [
+        "退货通知",
+        "退货单",
+        "客户退货通知"
+      ],
+      "desc": "客户退货时的通知单，可下推生成销售退货单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FReturnReason,FReturnQty",
+      "db_tables": [
+        "T_SAL_RETURNNOTICE",
+        "T_SAL_RETURNNOTICEENTRY"
+      ]
+    },
+    "SAL_AvailableQuery": {
+      "name": "可发量查询",
+      "alias": [
+        "可发量",
+        "可用量",
+        "可用库存",
+        "库存可用量"
+      ],
+      "desc": "查询物料在指定仓库的可用库存数量（可发量 = 即时库存 - 已分配量）。",
+      "fields": "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FAvailableQty,FUnitId.FName",
+      "db_tables": [
+        "V_SAL_AVAILABLEQTY"
+      ]
+    },
+    "STK_InStock": {
+      "name": "采购入库单",
+      "alias": [
+        "采购入库",
+        "入库单",
+        "入库",
+        "来货入库"
+      ],
+      "desc": "物料实际验收入库的单据。来料检验的物料须先收料检验，合格后再入库；不需检验的物料可直接从采购订单下推入库。审核时累加采购订单【累计入库数量】。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FMaterialId.FName,FInQty,FSupplierId.FName",
+      "db_tables": [
+        "T_STK_INSTOCK",
+        "T_STK_INSTOCKENTRY"
+      ],
+      "business_rules": {
+        "审核更新": "入库单审核时累加采购订单【累计入库数量】；反审核时扣减",
+        "交货数量控制": "勾选控制交货数量时，入库数量不能超过采购订单【交货上限】",
+        "交货时间控制": "入库日期须在采购订单【最早/最晚交货时间】之间"
+      }
+    },
+    "STK_MisDelivery": {
+      "name": "其他出库单",
+      "alias": [
+        "其他出库",
+        "杂发",
+        "领料",
+        "生产领料"
+      ],
+      "desc": "除销售出库外的物料出库单据，如生产领料、样品领用等。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FOutQty,FReason",
+      "db_tables": [
+        "T_STK_MISDELIVERY",
+        "T_STK_MISDELIVERYENTRY"
+      ]
+    },
+    "STK_Miscellaneous": {
+      "name": "其他入库单",
+      "alias": [
+        "其他入库",
+        "杂收",
+        "盘盈入库"
+      ],
+      "desc": "除采购入库外的物料入库单据，如盘盈入库、样品入库等。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FInQty,FReason",
+      "db_tables": [
+        "T_STK_MISCELLANEOUS",
+        "T_STK_MISCELLANEOUSENTRY"
+      ]
+    },
+    "STK_TransferDirect": {
+      "name": "直接调拨单",
+      "alias": [
+        "调拨",
+        "调拨单",
+        "库存调拨",
+        "仓库调拨"
+      ],
+      "desc": "仓库之间的物料调拨，单据审核后直接更新即时库存。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOutId.FName,FStockInId.FName,FMaterialId.FName,FTransferQty",
+      "db_tables": [
+        "T_STK_TRANSFERDIRECT",
+        "T_STK_TRANSFERDIRECTENTRY"
+      ]
+    },
+    "STK_Inventory": {
+      "name": "即时库存",
+      "alias": [
+        "库存",
+        "即时库存",
+        "库存查询",
+        "现存量"
+      ],
+      "desc": "物料在各仓库的实时库存数量，是出入库业务的结果。",
+      "fields": "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FStockLocId.FName,FBaseQty,FUnitId.FName",
+      "db_tables": [
+        "T_STK_INVENTORY"
+      ],
+      "business_rules": {
+        "库存冻结": "冻结的库存行不允许出库",
+        "批次管理": "有批号的物料出库须指定批号"
+      }
+    },
+    "STK_StockCountInput": {
+      "name": "盘点单",
+      "alias": [
+        "盘点",
+        "盘点单",
+        "库存盘点",
+        "盘点"
+      ],
+      "desc": "定期或不定期对仓库物料进行清点，差异生成其他出入库单据。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FInspectorId.FName,FStockTakeStatus",
+      "db_tables": [
+        "T_STK_STKCOUNTINPUT",
+        "T_STK_STKCOUNTINPUTENTRY"
+      ]
+    },
+    "STK_TransferApply": {
+      "name": "调拨申请单",
+      "alias": [
+        "调拨申请",
+        "调拨单申请"
+      ],
+      "desc": "申请仓库之间物料调拨，审核后下推生成调拨单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSendStockId.FName,FReceiveStockId.FName,FMaterialId.FName,FApplyQty",
+      "db_tables": [
+        "T_STK_TRANSFERAPPLY",
+        "T_STK_TRANSFERAPPLYENTRY"
+      ]
+    },
+    "STK_TRANSFERIN": {
+      "name": "分布式调入单",
+      "alias": [
+        "调入单",
+        "调拨入库",
+        "调拨接收"
+      ],
+      "desc": "分布式调拨模式下的调入单，由调出单下推生成。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FInQty",
+      "db_tables": [
+        "T_STK_TRANSFERIN",
+        "T_STK_TRANSFERINENTRY"
+      ]
+    },
+    "STK_TRANSFEROUT": {
+      "name": "分布式调出单",
+      "alias": [
+        "调出单",
+        "调拨出库",
+        "调拨发出"
+      ],
+      "desc": "分布式调拨模式下的调出单，审核后下推生成调入单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FStockId.FName,FOutQty",
+      "db_tables": [
+        "T_STK_TRANSFEROUT",
+        "T_STK_TRANSFEROUTENTRY"
+      ]
+    },
+    "STK_AssembledApp": {
+      "name": "组装拆卸单",
+      "alias": [
+        "组装",
+        "拆卸",
+        "组装拆卸",
+        "拆装"
+      ],
+      "desc": "将多个物料组装为产成品，或将产成品拆卸为原材料。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FAssembleType,FMaterialId.FName",
+      "db_tables": [
+        "T_STK_ASSEMBLEAPP",
+        "T_STK_ASSEMBLEAPPENTRY"
+      ]
+    },
+    "STK_OutStockApply": {
+      "name": "出库申请单",
+      "alias": [
+        "出库申请",
+        "领料申请"
+      ],
+      "desc": "物料需要出库时发起的申请，如生产领料申请。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockOrgId.FName,FMaterialId.FName,FApplyQty",
+      "db_tables": [
+        "T_STK_OUTSTOCKAPPLY",
+        "T_STK_OUTSTOCKAPPLYENTRY"
+      ]
+    },
+    "STK_StatusConvert": {
+      "name": "形态转换单",
+      "alias": [
+        "形态转换",
+        "库存状态",
+        "状态转换"
+      ],
+      "desc": "物料在仓库内的状态变更（如合格品→不良品），仅更新库存状态不移动数量。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FStockId.FName,FMaterialId.FName,FStatusBefore,FStatusAfter,FConvertQty",
+      "db_tables": [
+        "T_STK_STATUSCONVERT",
+        "T_STK_STATUSCONVERTENTRY"
+      ]
+    },
+    "QIS_InspectBill": {
+      "name": "来料检验单",
+      "alias": [
+        "来料检验",
+        "质检单",
+        "质量检验",
+        "IQC",
+        "来料质检"
+      ],
+      "desc": "对采购物料进行质量检验，判断是否允许入库。来料检验单须关联收料通知单生成；检验结果决定物料入合格品还是不良品库。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPassQty,FFailQty,FInspectResult",
+      "db_tables": [
+        "T_QIS_INSPECTBILL",
+        "T_QIS_INSPECTBILLENTRY"
+      ],
+      "business_rules": {
+        "检验结果": "FPassQty=合格数量，FFailQty=不合格数量",
+        "合格品入库": "合格物料下推入库单至合格品仓库",
+        "不合格处理": "不合格物料需走特采或退货流程"
+      }
+    },
+    "AP_Payable": {
+      "name": "应付单",
+      "alias": [
+        "应付",
+        "应付单",
+        "应付账款",
+        "采购发票"
+      ],
+      "desc": "记录企业对供应商的应付账款，由采购入库单下推或手工创建。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FAmount,FCloseStatus",
+      "db_tables": [
+        "T_AP_PAYABLE",
+        "T_AP_PAYABLEENTRY"
+      ],
+      "business_rules": {
+        "核销": "付款单核销后，采购订单的预付金额会被占用",
+        "付款关联": "采购订单被付款单关联后，不可反审核"
+      }
+    },
+    "AR_Receivable": {
+      "name": "应收单",
+      "alias": [
+        "应收",
+        "应收单",
+        "应收账款",
+        "销售发票"
+      ],
+      "desc": "记录企业应收客户的款项，由销售出库单下推或手工创建。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FAmount,FCloseStatus",
+      "db_tables": [
+        "T_AR_RECEIVABLE",
+        "T_AR_RECEIVABLEENTRY"
+      ]
+    },
+    "TRNV_Receipt": {
+      "name": "二开收款单",
+      "alias": [
+        "收款单",
+        "二开收款",
+        "SKD"
+      ],
+      "desc": "二开定制的收款单（不走标准 AR_Receivable），支持从销售订单或销售订单收款计划下推生成。",
+      "fields": "FID,FBillNo,FDocumentStatus,F_TRNV_BusinessDate",
+      "db_tables": [
+        "TRNV_t_Cust100002",
+        "TRNV_t_Cust_Entry100007"
+      ],
+      "entity_key": "FEntity",
+      "entry_fields": {
+        "TRNV_t_Cust_Entry100007": "FEntryID,F_TRNV_Amount_bh8,F_TRNV_SourceBillType_986,F_TRNV_SourceBillNo_0ev,F_TRNV_ReceiveType,F_TRNV_PONo,F_TRNV_Material,F_TRNV_Qty2,F_TRNV_OriginalPrice,F_TRNV_UnitPrice"
+      },
+      "business_rules": {
+        "源单关联": "F_TRNV_SourceBillNo_0ev 存销售订单号(FBILLNO)；FEntity_Link.STableName ∈ {T_SAL_ORDERENTRY(按销售订单分录), T_SAL_ORDERPLAN(按销售订单收款计划)}",
+        "金额字段": "明细收款金额 = F_TRNV_Amount_bh8",
+        "已收汇总": "SUM(F_TRNV_Amount_bh8) WHERE FDOCUMENTSTATUS='C' GROUP BY F_TRNV_SourceBillNo_0ev",
+        "反写约束": "不走标准 AR 链路，标准收款审核插件不监听本单；销售订单 FRECEIVEDAMOUNT 需自定义审核后插件反写",
+        "字段命名": "金蝶 BOS WebAPI 字段名混合大小写（如 F_TRNV_Amount_bh8），不是全大写"
+      }
+    },
+    "TRNV_PaymentSlip": {
+      "name": "二开付款单",
+      "alias": [
+        "付款单",
+        "二开付款",
+        "FKD"
+      ],
+      "desc": "二开定制的付款单（不走标准 AP_Payable），支持从采购订单或采购订单付款计划下推生成。F_TRNV_SONo 用于回挂对应销售订单做毛利闭环。",
+      "fields": "FID,FBillNo,FDocumentStatus,F_TRNV_BusinessDate,F_TRNV_Base_hpu",
+      "db_tables": [
+        "TRNV_t_Cust100003",
+        "TRNV_t_Cust_Entry100008"
+      ],
+      "entity_key": "FEntity",
+      "entry_fields": {
+        "TRNV_t_Cust_Entry100008": "FEntryID,F_TRNV_Amount_bh8,F_TRNV_SourceBillType_986,F_TRNV_SourceBillNo_0ev,F_TRNV_PushDownType,F_TRNV_SONo,F_TRNV_Qty,F_TRNV_MaterialId,F_TRNV_OriginalPrice,F_TRNV_UnitPrice,F_TRNV_WaterBillNumber"
+      },
+      "business_rules": {
+        "源单关联": "F_TRNV_SourceBillNo_0ev 存采购订单号；F_TRNV_SONo 冗余存关联销售订单号(用于毛利闭环对账)",
+        "_LK 源表": "FEntity_Link.STableName ∈ {t_PUR_POOrderEntry(按订单分录下推), T_PUR_POORDERINSTALLMENT(按付款计划下推)}",
+        "PushDownType": "1=按付款计划下推(对应 T_PUR_POORDERINSTALLMENT)；2/3=按订单分录下推(对应 t_PUR_POOrderEntry)",
+        "金额字段": "明细付款金额 = F_TRNV_Amount_bh8",
+        "反写约束": "不走标准 AP 链路；采购订单已付金额需自定义审核后插件反写",
+        "毛利闭环": "同一笔销售：SUM(收款.F_TRNV_Amount_bh8 WHERE F_TRNV_SourceBillNo_0ev=SO号) - SUM(付款.F_TRNV_Amount_bh8 WHERE F_TRNV_SONo=SO号)",
+        "字段命名": "金蝶 BOS WebAPI 字段名混合大小写（如 F_TRNV_Amount_bh8），不是全大写"
+      }
+    },
+    "PRD_MO": {
+      "name": "生产订单",
+      "alias": [
+        "生产订单",
+        "生产单",
+        "MO",
+        "工单",
+        "工单生产"
+      ],
+      "desc": "生产部门依据生产计划下达的生产任务单，关联物料清单（BOM）和工艺路线。可下推生成生产领料单、产品入库单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FUnitId.FName,FQty,FStockInQty,FPickMtrlQty,FPlanStartDate,FPlanFinishDate",
+      "db_tables": [
+        "T_PRD_MO",
+        "T_PRD_MOENTRY"
+      ],
+      "business_rules": {
+        "FStockInQty": "累计产品入库数量（产品入库单审核时累加）",
+        "FPickMtrlQty": "累计领料数量（生产领料单审核时累加）",
+        "汇报投料": "生产汇报时投料数量累加至【累计投料数量】"
+      }
+    },
+    "PRD_PickMtrl": {
+      "name": "生产领料单",
+      "alias": [
+        "生产领料",
+        "领料单",
+        "领料"
+      ],
+      "desc": "依据生产订单或工序汇报发起的领料单据，审核时扣减即时库存。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FPickQty,FMoBillNo",
+      "db_tables": [
+        "T_PRD_PICKMTRL",
+        "T_PRD_PICKMTRLENTRY"
+      ],
+      "business_rules": {
+        "审核扣库": "审核时扣减即时库存；反审核时回补库存",
+        "超领控制": "超领须经审批后才能继续领料"
+      }
+    },
+    "PRD_Instock": {
+      "name": "产品入库单",
+      "alias": [
+        "产品入库",
+        "完工入库",
+        "生产入库"
+      ],
+      "desc": "生产完工的产品入库单据，审核时增加即时库存并更新生产订单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FInQty,FMoBillNo",
+      "db_tables": [
+        "T_PRD_INSTOCK",
+        "T_PRD_INSTOCKENTRY"
+      ]
+    },
+    "ER_ExpenseRequest": {
+      "name": "费用申请单",
+      "alias": [
+        "费用申请",
+        "申请单",
+        "事前申请"
+      ],
+      "desc": "业务发生前的事前费用申请，审核后可作为报销的依据。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FTotalAmount,FExpenseTypeId.FName",
+      "db_tables": [
+        "T_ER_EXPENSEREQUEST",
+        "T_ER_EXPENSEREQUESTENTRY"
+      ]
+    },
+    "ER_ExpenseReimburse": {
+      "name": "费用报销单",
+      "alias": [
+        "费用报销",
+        "报销单",
+        "报销",
+        "事后报销"
+      ],
+      "desc": "业务发生后的费用报销单据，可关联费用申请单，审核后生成付款单。",
+      "fields": "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FTotalReimAmount,FExpenseTypeId.FName",
+      "db_tables": [
+        "T_ER_EXPENSEREIMBURSE",
+        "T_ER_EXPENSEREIMBURSEENTRY"
+      ],
+      "business_rules": {
+        "关联申请": "可关联费用申请单；无申请单的报销须走预算外审批流程",
+        "审核后付款": "审核后可下推生成付款单"
+      }
+    }
+  },
+  "verbs": [
+    {
+      "tool": "kingdee_usage_report",
+      "line": 601,
+      "input_model": "UsageReportInput",
+      "title": "查看使用报告",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Introspect",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_usage_stats",
+      "line": 626,
+      "input_model": null,
+      "title": "查看使用统计",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Introspect",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_discover_tables",
+      "line": 2026,
+      "input_model": "SqlSearchInput",
+      "title": "搜索数据库表",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Discover",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_discover_columns",
+      "line": 2075,
+      "input_model": "SqlSearchInput",
+      "title": "搜索数据库字段",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Discover",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_describe_table",
+      "line": 2132,
+      "input_model": "SqlDescribeInput",
+      "title": "查看表结构",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Discover",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_discover_metadata_candidates",
+      "line": 2215,
+      "input_model": "MetadataCandidateInput",
+      "title": "金蝶元数据候选发现",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Discover",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_bills",
+      "line": 2418,
+      "input_model": "QueryInput",
+      "title": "通用单据查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_view_bill",
+      "line": 2446,
+      "input_model": "ViewInput",
+      "title": "查看单据详情",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Read",
+      "endpoints": [
+        "view"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_purchase_orders",
+      "line": 2503,
+      "input_model": "QueryInput",
+      "title": "查询采购订单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_purchase_order_progress",
+      "line": 2551,
+      "input_model": "PurchaseOrderProgressInput",
+      "title": "查询采购订单执行进度",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_sale_orders",
+      "line": 2617,
+      "input_model": "QueryInput",
+      "title": "查询销售订单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_sale_quotations",
+      "line": 2648,
+      "input_model": "QueryInput",
+      "title": "查询销售报价单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_stock_bills",
+      "line": 2688,
+      "input_model": "QueryInput",
+      "title": "查询出入库单据",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_inventory",
+      "line": 2719,
+      "input_model": "InventoryQueryInput",
+      "title": "查询即时库存",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_materials",
+      "line": 2746,
+      "input_model": "MaterialQueryInput",
+      "title": "查询物料档案",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_partners",
+      "line": 2773,
+      "input_model": "PartnerQueryInput",
+      "title": "查询客户或供应商",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_save_bill",
+      "line": 2797,
+      "input_model": "SaveInput",
+      "title": "新建或修改单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Save",
+      "endpoints": [
+        "save"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_validate_bill",
+      "line": 2926,
+      "input_model": "SaveInput",
+      "title": "保存前校验单据",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Validate",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_get_bill_template",
+      "line": 2999,
+      "input_model": "str",
+      "title": "获取单据模板",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Read",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_refresh_metadata",
+      "line": 3032,
+      "input_model": "str",
+      "title": "刷新表单元数据缓存",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Refresh",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_submit_bills",
+      "line": 3058,
+      "input_model": "BillIdsInput",
+      "title": "提交单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Submit",
+      "endpoints": [
+        "submit"
+      ],
+      "per_id_loop": true,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_audit_bills",
+      "line": 3095,
+      "input_model": "BillIdsInput",
+      "title": "审核单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Audit",
+      "endpoints": [
+        "audit"
+      ],
+      "per_id_loop": true,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_unaudit_bills",
+      "line": 3131,
+      "input_model": "BillIdsInput",
+      "title": "反审核单据",
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "verb": "Unaudit",
+      "endpoints": [
+        "unaudit"
+      ],
+      "per_id_loop": true,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_delete_bills",
+      "line": 3167,
+      "input_model": "BillIdsInput",
+      "title": "删除单据",
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "verb": "Delete",
+      "endpoints": [
+        "delete"
+      ],
+      "per_id_loop": true,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_cancel_bills",
+      "line": 3365,
+      "input_model": "ExecuteActionInput",
+      "title": "撤销单据/基础资料",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Cancel",
+      "endpoints": [
+        "cancel_assign"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_void_bills",
+      "line": 3395,
+      "input_model": "ExecuteActionInput",
+      "title": "作废单据",
+      "read_only": false,
+      "destructive": true,
+      "idempotent": false,
+      "verb": "Void",
+      "endpoints": [
+        "execute"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_close_bill",
+      "line": 3420,
+      "input_model": "ExecuteActionInput",
+      "title": "整单关闭单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Close",
+      "endpoints": [
+        "execute"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_unclose_bill",
+      "line": 3459,
+      "input_model": "ExecuteActionInput",
+      "title": "整单反关闭单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Unclose",
+      "endpoints": [
+        "execute"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_forbid_bills",
+      "line": 3498,
+      "input_model": "ExecuteActionInput",
+      "title": "禁用基础资料",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Forbid",
+      "endpoints": [
+        "execute"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_enable_bills",
+      "line": 3522,
+      "input_model": "ExecuteActionInput",
+      "title": "反禁用基础资料",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Enable",
+      "endpoints": [
+        "execute"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_push_bill",
+      "line": 3569,
+      "input_model": "PushDownInput",
+      "title": "下推单据",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Push",
+      "endpoints": [
+        "push"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_create_and_audit",
+      "line": 3667,
+      "input_model": "CreateAndAuditInput",
+      "title": "创建并审核单据（一站式）",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Composite",
+      "endpoints": [
+        "audit",
+        "save",
+        "submit"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_push_and_audit",
+      "line": 3800,
+      "input_model": "PushAndAuditInput",
+      "title": "下推并审核目标单（一站式）",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Push",
+      "endpoints": [
+        "audit",
+        "push",
+        "submit"
+      ],
+      "per_id_loop": true,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_create_lx_billing",
+      "line": 4015,
+      "input_model": "CreateLxBillingInput",
+      "title": "创建二开收/付款单（一站式）",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Composite",
+      "endpoints": [
+        "audit",
+        "push",
+        "save",
+        "submit"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_user",
+      "line": 4311,
+      "input_model": "UserQueryInput",
+      "title": "查询用户",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_role",
+      "line": 4338,
+      "input_model": "RoleQueryInput",
+      "title": "查询角色",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_permission",
+      "line": 4364,
+      "input_model": "PermissionQueryInput",
+      "title": "查询权限",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_sequence",
+      "line": 4390,
+      "input_model": "SequenceQueryInput",
+      "title": "查询编码规则",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_number_rule",
+      "line": 4416,
+      "input_model": "NumberRuleQueryInput",
+      "title": "查询单据编号规则",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_system_config",
+      "line": 4442,
+      "input_model": "SystemConfigInput",
+      "title": "查询系统配置",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_list_forms",
+      "line": 4490,
+      "input_model": "FormSearchInput",
+      "title": "查询可用表单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Discover",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_get_fields",
+      "line": 4536,
+      "input_model": "FieldQueryInput",
+      "title": "获取表单字段及业务规则",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Read",
+      "endpoints": [],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_pending_approvals",
+      "line": 4726,
+      "input_model": "WorkflowQueryInput",
+      "title": "查询待审批单据",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_workflow_status",
+      "line": 4799,
+      "input_model": "WorkflowStatusInput",
+      "title": "查询单据审批状态",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "view"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_workflow_approve",
+      "line": 4845,
+      "input_model": "WorkflowActionInput",
+      "title": "审批通过",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Approve",
+      "endpoints": [
+        "audit",
+        "unaudit"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_expense_reimburse",
+      "line": 4880,
+      "input_model": "QueryInput",
+      "title": "查询费用报销单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_loan_balance",
+      "line": 4921,
+      "input_model": "QueryInput",
+      "title": "查询借款余额",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_sales_outstock",
+      "line": 4968,
+      "input_model": "QueryInput",
+      "title": "查询销售出库单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_delivery_notice",
+      "line": 5020,
+      "input_model": "QueryInput",
+      "title": "查询发货通知单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_stock_in",
+      "line": 5075,
+      "input_model": "QueryInput",
+      "title": "查询采购入库单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_fixed_asset",
+      "line": 5130,
+      "input_model": "QueryInput",
+      "title": "查询固定资产",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_asset_card",
+      "line": 5151,
+      "input_model": "QueryInput",
+      "title": "查询资产卡片",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_asset_depreciation",
+      "line": 5170,
+      "input_model": "QueryInput",
+      "title": "查询资产折旧记录",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_save_asset",
+      "line": 5188,
+      "input_model": "SaveInput",
+      "title": "新增或修改固定资产",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Save",
+      "endpoints": [
+        "save"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_asset_transfer",
+      "line": 5201,
+      "input_model": "QueryInput",
+      "title": "查询资产调拨单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_asset_scrape",
+      "line": 5220,
+      "input_model": "QueryInput",
+      "title": "查询资产报废单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_purchase_requisitions",
+      "line": 5247,
+      "input_model": "QueryInput",
+      "title": "查询采购申请单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_quality_inspections",
+      "line": 5282,
+      "input_model": "QueryInput",
+      "title": "查询来料检验单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_stock_transfer_apply",
+      "line": 5316,
+      "input_model": "QueryInput",
+      "title": "查询调拨申请单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_audit_log",
+      "line": 5440,
+      "input_model": "AuditLogInput",
+      "title": "查询审计日志",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_operation_logs",
+      "line": 5518,
+      "input_model": "OperationLogInput",
+      "title": "查询操作日志",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_change_log",
+      "line": 5596,
+      "input_model": "ChangeLogInput",
+      "title": "查询变更记录",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_approval_flow",
+      "line": 5672,
+      "input_model": "ApprovalFlowInput",
+      "title": "查询审批流程",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_permission_changes",
+      "line": 5759,
+      "input_model": "PermissionChangeInput",
+      "title": "查询权限变更",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_data_backup",
+      "line": 5842,
+      "input_model": "DataBackupInput",
+      "title": "查询数据备份记录",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_purchase_inquiry",
+      "line": 5919,
+      "input_model": "QueryInput",
+      "title": "查询采购询价单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_supplier_quotes",
+      "line": 5952,
+      "input_model": "QueryInput",
+      "title": "查询供应商报价单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_misc_movement_detail",
+      "line": 5993,
+      "input_model": "QueryInput",
+      "title": "查询杂项出入库明细表",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_transfer_pending_detail",
+      "line": 6037,
+      "input_model": "QueryInput",
+      "title": "查询分步式调出未调入明细",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_transfer_apply",
+      "line": 6082,
+      "input_model": "QueryInput",
+      "title": "查询调拨申请单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_transfer_direct",
+      "line": 6129,
+      "input_model": "QueryInput",
+      "title": "查询直接调拨单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_push_stock_transfer",
+      "line": 6176,
+      "input_model": "PushDownInput",
+      "title": "调拨申请下推调拨单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Push",
+      "endpoints": [
+        "push"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_material_cost",
+      "line": 6391,
+      "input_model": "QueryInput",
+      "title": "查询物料成本库",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_material_target_cost",
+      "line": 6424,
+      "input_model": "QueryInput",
+      "title": "查询物料目标成本单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_cost_calculation",
+      "line": 6455,
+      "input_model": "QueryInput",
+      "title": "查询成本计算单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_cost_centers",
+      "line": 6487,
+      "input_model": "QueryInput",
+      "title": "查询成本中心",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_cost_items",
+      "line": 6518,
+      "input_model": "QueryInput",
+      "title": "查询成本项目",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_product_standard_cost",
+      "line": 6549,
+      "input_model": "QueryInput",
+      "title": "查询产品标准成本",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_cost_adjustments",
+      "line": 6580,
+      "input_model": "QueryInput",
+      "title": "查询成本调整单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_save_cost_adjustment",
+      "line": 6611,
+      "input_model": "SaveInput",
+      "title": "保存成本调整单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Save",
+      "endpoints": [
+        "save"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_instant_cost_compare",
+      "line": 6647,
+      "input_model": "QueryInput",
+      "title": "即时成本对比分析",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_cost_trend",
+      "line": 6680,
+      "input_model": "QueryInput",
+      "title": "成本价趋势分析",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_finished_product_cost",
+      "line": 6713,
+      "input_model": "QueryInput",
+      "title": "完工入库成本查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_material_cost_usage",
+      "line": 6744,
+      "input_model": "QueryInput",
+      "title": "材料耗用成本查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_production_orders",
+      "line": 6784,
+      "input_model": "QueryInput",
+      "title": "查询生产订单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_production_pick_materials",
+      "line": 6817,
+      "input_model": "QueryInput",
+      "title": "查询生产领料单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_production_stock_in",
+      "line": 6849,
+      "input_model": "QueryInput",
+      "title": "查询生产入库单",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_view_production_order",
+      "line": 6881,
+      "input_model": "ViewInput",
+      "title": "查看生产订单详情",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Read",
+      "endpoints": [
+        "view"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_save_production_order",
+      "line": 6908,
+      "input_model": "ProductionOrderSaveInput",
+      "title": "新建或修改生产订单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Save",
+      "endpoints": [
+        "save"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_submit_production_orders",
+      "line": 6943,
+      "input_model": "ProductionOrderBillIdsInput",
+      "title": "提交生产订单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Submit",
+      "endpoints": [
+        "submit"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_audit_production_orders",
+      "line": 6964,
+      "input_model": "ProductionOrderBillIdsInput",
+      "title": "审核生产订单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Audit",
+      "endpoints": [
+        "audit"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_push_production_pick",
+      "line": 6990,
+      "input_model": "ProductionPickPushInput",
+      "title": "生产订单下推领料单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Push",
+      "endpoints": [
+        "push"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_push_production_stock_in",
+      "line": 7025,
+      "input_model": "ProductionStockInPushInput",
+      "title": "生产领料单下推入库单",
+      "read_only": false,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Push",
+      "endpoints": [
+        "push"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_mrp_result",
+      "line": 7063,
+      "input_model": "MRPResultQueryInput",
+      "title": "MRP运算结果查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_production_plan",
+      "line": 7092,
+      "input_model": "ProductionPlanQueryInput",
+      "title": "生产计划单查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_production_report",
+      "line": 7120,
+      "input_model": "ProductionReportQueryInput",
+      "title": "生产汇报单查询",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": false,
+      "verb": "Query",
+      "endpoints": [
+        "query"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    },
+    {
+      "tool": "kingdee_query_report",
+      "line": 7177,
+      "input_model": "ReportQueryInput",
+      "title": "财务报表/账表查询(GetSysReportData)",
+      "read_only": true,
+      "destructive": false,
+      "idempotent": true,
+      "verb": "Query",
+      "endpoints": [
+        "report"
+      ],
+      "per_id_loop": false,
+      "ids_joined": false
+    }
+  ],
+  "states": {
+    "save": {
+      "from": "草稿",
+      "to": "草稿",
+      "success": true,
+      "next_action": "submit",
+      "next_action_desc": "建议调用 kingdee_submit_bills 提交单据至审核队列"
+    },
+    "submit": {
+      "from": "草稿",
+      "to": "待审核",
+      "success": true,
+      "next_action": "audit",
+      "next_action_desc": "建议调用 kingdee_audit_bills 审核单据"
+    },
+    "audit": {
+      "from": "待审核",
+      "to": "已审核",
+      "success": true,
+      "next_action": null,
+      "next_action_desc": "操作完成，单据已生效"
+    },
+    "unaudit": {
+      "from": "已审核",
+      "to": "待审核",
+      "success": true,
+      "next_action": null,
+      "next_action_desc": "已反审核，可修改后重新提交"
+    },
+    "delete": {
+      "from": "草稿",
+      "to": "已删除",
+      "success": true,
+      "next_action": null,
+      "next_action_desc": "单据已删除"
+    },
+    "push": {
+      "from": "源单",
+      "to": "目标单草稿",
+      "success": true,
+      "next_action": "submit+audit",
+      "next_action_desc": "目标单已生成，请依次调用 kingdee_submit_bills + kingdee_audit_bills"
+    }
+  },
+  "links": [
+    {
+      "tool": "kingdee_push_stock_transfer",
+      "line": 6176,
+      "source_form": "STK_TransferApply",
+      "target_form": "STK_TransferDirect",
+      "hardcoded": true
+    },
+    {
+      "tool": "kingdee_push_production_pick",
+      "line": 6990,
+      "source_form": "PRD_MO",
+      "target_form": "PRD_PickMtrl",
+      "hardcoded": true
+    },
+    {
+      "tool": "kingdee_push_production_stock_in",
+      "line": 7025,
+      "source_form": "PRD_PickMtrl",
+      "target_form": "PRD_Instock",
+      "hardcoded": true
+    }
+  ],
+  "rules": {
+    "known_error_patterns": [
+      [
+        "502",
+        "金蝶不支持 HTTP/2，需显式传 http1=True",
+        "确保 httpx AsyncHTTPTransport(http1=True)"
+      ],
+      [
+        "Bad Gateway",
+        "同上，金蝶服务器不支持 HTTP/2",
+        "同上"
+      ],
+      [
+        "会话",
+        "Session 过期或未登录",
+        "调用 _login() 重新登录"
+      ],
+      [
+        "session",
+        "Session 过期（英文原文）",
+        "调用 _login() 重新登录"
+      ],
+      [
+        "关联数量",
+        "累计关联数量已达订单数量，无法下推",
+        "检查 FReceiveQty+FStockInQty 是否已满"
+      ],
+      [
+        "业务关闭",
+        "该行已业务关闭，不允许操作",
+        "检查 FBusinessClose 状态或联系管理员反关闭"
+      ],
+      [
+        "冻结",
+        "分录行已冻结，不允许编辑和关联操作",
+        "联系管理员解冻后重试"
+      ],
+      [
+        "终止",
+        "分录行已终止，不允许关联操作",
+        "检查 FTerminateStatus 状态"
+      ],
+      [
+        "交货数量",
+        "超过交货数量控制范围",
+        "检查 FDlyCntl_Low/High 配置"
+      ],
+      [
+        "权限",
+        "集成用户没有对应单据的操作权限",
+        "联系金蝶管理员开通权限"
+      ],
+      [
+        "字段不存在",
+        "字段在当前账套/模块中未启用",
+        "用 kingdee_get_fields 确认可用字段，或改用替代字段"
+      ],
+      [
+        "保存失败",
+        "下推或保存失败，详情见 ConvertResponseStatus",
+        "检查 ConvertResponseStatus 每行错误原因"
+      ],
+      [
+        "已被其他用户修改",
+        "乐观锁冲突，单据被并发修改",
+        "重新调用 kingdee_view_bill 拉最新数据再 Save"
+      ],
+      [
+        "已存在",
+        "唯一键冲突 (FBillNo / FNumber 重复)",
+        "检查是否重复 Save，或换一个编码"
+      ],
+      [
+        "不能为空",
+        "必录字段缺失",
+        "用 kingdee_get_fields 查必录项后补齐 model"
+      ],
+      [
+        "已审核",
+        "单据已审核，不允许再次提交/审核",
+        "用 kingdee_unaudit_bills 反审核后再操作"
+      ],
+      [
+        "非草稿",
+        "单据非草稿状态，不允许 Submit",
+        "确认单据状态后再决定下一步"
+      ],
+      [
+        "基础资料",
+        "外键引用不存在 (物料/客户/供应商/部门)",
+        "用 kingdee_query_materials / kingdee_query_partners 验证 FNumber"
+      ]
+    ],
+    "known_error_next_actions": {
+      "字段不存在": {
+        "tool": "kingdee_get_fields",
+        "args_hint": "form_id"
+      },
+      "不能为空": {
+        "tool": "kingdee_get_fields",
+        "args_hint": "form_id"
+      },
+      "已被其他用户修改": {
+        "tool": "kingdee_view_bill",
+        "args_hint": "form_id, bill_id"
+      },
+      "关联数量": {
+        "tool": "kingdee_query_purchase_order_progress",
+        "args_hint": "源单 FBillNo"
+      },
+      "基础资料": {
+        "tool": "kingdee_query_materials | kingdee_query_partners",
+        "args_hint": "FNumber"
+      },
+      "已审核": {
+        "tool": "kingdee_unaudit_bills",
+        "args_hint": "form_id, bill_ids"
+      },
+      "已存在": {
+        "tool": "kingdee_query_bills",
+        "args_hint": "form_id, FBillNo / FNumber"
+      }
+    }
+  }
+}
