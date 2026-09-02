@@ -37,6 +37,11 @@ class Verb:
     endpoint: Optional[str] = None
     requires_state: tuple[str, ...] = ()
     to_state: Optional[str] = None
+    # 补偿 ≠ 逆动词：inverse 把**同一个对象**退回上一状态；
+    # compensation 把**这一步的产物**清理掉。push 没有 inverse（不存在 unpush），
+    # 但补偿是 delete——删掉新生成的下游单。对象都不是同一个。
+    compensation: Optional[str] = None
+    compensation_target: Optional[str] = None   # self | produced | None(退不回来)
 
     @property
     def destructive(self) -> bool:
@@ -90,6 +95,8 @@ class Ontology:
                 endpoint=v.get("endpoint"),
                 requires_state=tuple(v.get("requires_state") or ()),
                 to_state=v.get("to_state"),
+                compensation=v.get("compensation"),
+                compensation_target=v.get("compensation_target"),
             ) for k, v in (raw.get("verbs") or {}).items()
         }
         self.nouns: dict[str, Noun] = {
@@ -202,6 +209,8 @@ class Ontology:
                 return {"verb": v.name, "zh": v.zh, "kind": v.kind, "arity": v.arity,
                         "atomicity": v.atomicity, "idempotent": v.idempotent,
                         "inverse": v.inverse, "destructive": v.destructive,
+                        "compensation": v.compensation,
+                        "compensation_target": v.compensation_target,
                         "requires_state": list(v.requires_state), "to_state": v.to_state}
             return {"verbs": [{"verb": v.name, "zh": v.zh, "kind": v.kind,
                                "atomicity": v.atomicity, "destructive": v.destructive}

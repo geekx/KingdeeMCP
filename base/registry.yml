@@ -6,6 +6,21 @@
 version: 1
 
 # ── 动词：契约是一等公民（审计 A-2 的对症设计）──────────────
+#
+# ⚠️ inverse 与 compensation 是**两个概念**，不要混用：
+#
+#   inverse       把**同一个对象**退回上一状态。audit 的逆是 unaudit——
+#                 还是那张单，状态退回去。
+#   compensation  把**这一步的产物**清理掉。push 没有逆动词（不存在 unpush），
+#                 但它的补偿是 delete——删掉新生成的那张下游单。
+#                 对象都不是同一个，所以不能拿 inverse 顶替。
+#
+# compensation_target 说明补偿作用在谁身上：
+#   self      这一步操作的对象（submit/audit/save）
+#   produced  这一步生成的对象（push）
+#   null      真的退不回来（delete/void）——做了就没了，只能在事前拦
+#
+# Saga 的 `补偿:` 默认取这里的值；profile 只在需要覆盖时才写。
 verbs:
   query:
     zh: 查询
@@ -32,6 +47,8 @@ verbs:
     idempotent: false
     inverse: delete              # 新建的逆是删除；修改无真正的逆（旧值不留存）
     requires_state: ['NONEXISTENT', 'Z:暂存', 'A:创建']
+    compensation: delete        # 新建的可删；**修改**的退不回旧值——已审核后尤其
+    compensation_target: self
 
   submit:
     zh: 提交
@@ -43,6 +60,8 @@ verbs:
     inverse: cancel              # 撤销（CancelAssign）把已提交单退回
     requires_state: ['Z:暂存', 'A:创建']
     to_state: 'B:审核中'
+    compensation: cancel        # 撤销回可编辑状态
+    compensation_target: self
 
   audit:
     zh: 审核
@@ -54,6 +73,8 @@ verbs:
     inverse: unaudit
     requires_state: ['B:审核中']
     to_state: 'C:已审核'
+    compensation: unaudit        # 反审核。注意已下推的下游单会受影响
+    compensation_target: self
 
   unaudit:
     zh: 反审核
@@ -65,6 +86,8 @@ verbs:
     inverse: audit
     requires_state: ['C:已审核']
     to_state: 'A:创建'
+    compensation: audit        # 重新审核回去
+    compensation_target: self
 
   delete:
     zh: 删除
@@ -76,6 +99,8 @@ verbs:
     inverse: null                # 无逆动词 = destructive，调用前需确认
     requires_state: ['Z:暂存', 'A:创建']
     to_state: 'DELETED'
+    compensation: null        # 物理删除，退不回来。只能在事前拦
+    compensation_target: null
 
   cancel:
     zh: 撤销
@@ -85,6 +110,8 @@ verbs:
     atomicity: server_defined
     idempotent: false
     inverse: submit              # 撤销后可重新提交
+    compensation: submit        # 重新提交
+    compensation_target: self
 
   void:
     zh: 作废
@@ -96,6 +123,8 @@ verbs:
     inverse: null                # 无逆动词 = destructive，调用前需确认
     requires_state: ['C:已审核']
     to_state: 'VOID'
+    compensation: null        # 作废不可恢复
+    compensation_target: null
 
   close:
     zh: 整单关闭
@@ -107,6 +136,8 @@ verbs:
     inverse: unclose
     requires_state: ['C:已审核']
     to_state: 'CLOSED'
+    compensation: unclose
+    compensation_target: self
 
   unclose:
     zh: 反关闭
@@ -118,6 +149,8 @@ verbs:
     inverse: close
     requires_state: ['CLOSED']
     to_state: 'C:已审核'
+    compensation: close
+    compensation_target: self
 
   forbid:
     zh: 禁用
@@ -129,6 +162,8 @@ verbs:
     inverse: enable
     requires_state: ['ENABLED']
     to_state: 'FORBIDDEN'
+    compensation: enable
+    compensation_target: self
 
   enable:
     zh: 启用
@@ -140,6 +175,8 @@ verbs:
     inverse: forbid
     requires_state: ['FORBIDDEN']
     to_state: 'ENABLED'
+    compensation: forbid
+    compensation_target: self
 
   push:
     zh: 下推
@@ -150,6 +187,8 @@ verbs:
     idempotent: false
     inverse: null                # 无逆动词 = destructive，调用前需确认
     requires_state: ['C:已审核']
+    compensation: delete        # 删掉生成的下游单。**不是** unpush——那个动作不存在
+    compensation_target: produced
 
 # ── 名词：allowed_verbs 让「动词×名词」适用性可校验（MISS-01）────
 nouns:
@@ -872,6 +911,17 @@ nouns:
     #     该表不会被更新。要确认审批实例的真实状态，查这张表而不是单据状态。
 
 
+  SAGA_Run:
+    zh: 操作运行
+    category: view                 # 由系统产生，不接受写动词——只能看
+    alias: [操作运行, 扳机组运行, saga]
+    allowed_verbs: [query, read]
+    default_fields: "run_id,operation,state,cursor,total_steps,updated_at"
+    note: >
+      多扣扳机组的一次运行。把它登记成名词，是为了让「态势可被感知」——
+      运行状态走的是和单据同一套机制（状态轨道、检索、卡片），
+      而不是另起一套只有工程师看得懂的枚举。
+
 # ── 单据编号前缀（启发式，用于「这张单是什么单」）──────────────
 #
 # ⚠️ 编号前缀由金蝶的**编码规则**决定，是租户可配的（见名词 SYS_NumberRule）。
@@ -910,6 +960,23 @@ states:
   "ENABLED":     {zh: 已启用,   field: FForbidStatus,    value: A,    terminal: false}
   "FORBIDDEN":   {zh: 已禁用,   field: FForbidStatus,    value: B,    terminal: false}
 
+  # ── 多扣扳机组运行的状态（对象 SAGA_Run）──────────────────
+  # 单独一组，因为它们描述的是「一次运行」而不是「一张单据」。
+  # 登记在这里，态势就能被同一套机制感知：状态轨道、检索、对象卡片。
+  "SAGA:pending":       {zh: 待开始,   field: state, value: pending,       terminal: false}
+  "SAGA:awaiting_auth": {zh: 等待授权, field: state, value: awaiting_auth, terminal: false,
+                         note: 最容易被忘掉的状态——放着不管，已生效的写操作就成了无人认领的中间态}
+  "SAGA:running":       {zh: 执行中,   field: state, value: running,       terminal: false}
+  "SAGA:done":          {zh: 已完成,   field: state, value: done,          terminal: true}
+  "SAGA:compensating":  {zh: 补偿中,   field: state, value: compensating,  terminal: false}
+  "SAGA:compensated":   {zh: 已补偿,   field: state, value: compensated,   terminal: true,
+                         note: 失败了但按逆序退干净了，没有遗留}
+  "SAGA:halted":        {zh: 已停止,   field: state, value: halted,        terminal: true,
+                         note: 停了且有东西没退掉——需要人决定续做还是清理}
+  "SAGA:compensation_failed":
+                        {zh: 补偿失败, field: state, value: compensation_failed, terminal: true,
+                         note: 最坏的终态。系统试图收拾却没收拾干净，必须人工处理}
+
 # 状态语义分组：修正 S-2（'D' 曾同时属于 pending 与 rejected 两个互斥类）
 state_groups:
   pending:  ["A:创建", "B:审核中", "D:重新审核"]   # 待处理：含被打回需重新审核的
@@ -943,6 +1010,23 @@ rules:
     kind: precondition
     zh: 下推的 (from,to) 必须是已登记的链接
     enforced_by: base.ontology.check_link
+  - id: SAGA-01
+    kind: precondition
+    zh: 写步骤之前必须先过守卫（有『检查』步骤时）
+    enforced_by: saga.engine.SagaEngine.advance
+    note: 没有守卫的顺序执行只是盲发，失败时才发现前提早就不成立
+  - id: SAGA-02
+    kind: precondition
+    zh: 标了『授权』的子任务必须逐步取得记名授权，整体确认一次不覆盖它
+    enforced_by: saga.engine.SagaEngine.authorize
+    note: 「生成开票申请」和「过账应收」的风险不同，凭什么一次确认覆盖两者
+  - id: SAGA-03
+    kind: postcondition
+    zh: 任一步失败时，已生效的写步骤按逆序补偿；补偿动作不得靠推断
+    enforced_by: saga.engine.SagaEngine.compensate
+    note: >
+      补偿默认取动词的 compensation 字段；profile 可覆盖但不得与本体矛盾。
+      没有 compensation 的动词（delete/void）失败后只报告遗留，不猜怎么收拾。
   - id: PRE-03
     kind: precondition
     zh: 动词的 requires_state 必须被满足（需先读取当前状态）

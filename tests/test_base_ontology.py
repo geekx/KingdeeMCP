@@ -165,26 +165,34 @@ class TestTenantOverlay:
 
 
 class TestOperationEntrypoints:
-    def test_dry_run_does_no_writes(self, tenant_o):
+    """业务操作现在走 Saga 引擎，返回形状随之变化（state / left_behind 取代
+    success / halted_at）。行为要求没变，断言相应更新；补偿、逐步授权、
+    守卫等新行为在 tests/test_saga.py 里单独覆盖。"""
+
+    def test_dry_run_does_no_writes(self, tenant_o, _isolated_audit):
         t = FakeTransport()
         d = Dispatcher(ontology=tenant_o, transport=t)
         r = asyncio.run(d.run_operation("销售开票", ["XSDD001"]))
         assert r["status"] == "awaiting_confirmation"
         assert t.calls == [], "未确认时不得发生任何写操作"
-        assert len(r["plan"]) == 5
+        assert len(r["steps"]) == 6
 
-    def test_runs_after_confirmation(self, tenant_o):
+    def test_runs_up_to_the_authorization_gate(self, tenant_o, _isolated_audit):
+        """『销售开票』的过账应收那步标了授权，跑到那里就该停下等人批。"""
         d = Dispatcher(ontology=tenant_o,
-                       transport=FakeTransport([PUSH_OK, OK, OK, PUSH_OK]))
+                       transport=FakeTransport([[{"FDocumentStatus": "C"}], PUSH_OK, OK]))
         r = asyncio.run(d.run_operation("销售开票", ["XSDD001"], confirmed=True))
-        assert r["success"] is True and len(r["steps"]) == 5
+        assert r["state"] == "awaiting_auth"
+        assert r["awaiting"]["role_required"] == "财务主管"
 
     def test_halt_reports_left_behind(self, tenant_o, _isolated_audit):
-        d = Dispatcher(ontology=tenant_o, transport=FakeTransport([PUSH_OK, FAIL]))
+        """失败后已声明补偿的步骤会被退掉；这里 submit 失败，push 产物应被删除。"""
+        d = Dispatcher(ontology=tenant_o,
+                       transport=FakeTransport([PUSH_OK, FAIL, OK]))
         r = asyncio.run(d.run_operation("采购收货入库", ["CGDD001"]))
-        assert r["success"] is False and r["halted_at"] == 2
-        assert r["left_behind"]["STK_InStock"] == ["RKD001"]
-        assert "不会自动回滚" in r["tip"]
+        assert r["state"] == "compensated"
+        assert r["left_behind"] == [], "声明了补偿就该退干净"
+        assert "补偿干净" in r["tip"]
 
     def test_all_steps_share_one_trace(self, tenant_o, _isolated_audit):
         """修 P-5：一次业务操作的所有步骤必须能拼回同一条链。"""
@@ -193,7 +201,6 @@ class TestOperationEntrypoints:
         recs = [json.loads(l) for l in open(_isolated_audit, encoding="utf-8")]
         assert len({r["trace_id"] for r in recs}) == 1
         assert {r["tool"] for r in recs} == {"kd_run:采购收货入库"}
-        assert [r["step"] for r in recs] == [1, 2, 3]
 
     def test_unknown_operation_points_to_profile(self, tenant_o):
         with pytest.raises(OntologyError) as e:

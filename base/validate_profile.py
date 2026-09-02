@@ -16,7 +16,9 @@ from base.ontology import OntologyError, load, load_profile  # noqa: E402
 
 STEP_VERBS = {"submit", "audit", "unaudit", "delete", "close", "unclose",
               "void", "cancel", "forbid", "enable", "save"}
-STEP_KINDS = {"下推", "确认"} | STEP_VERBS
+STEP_KINDS = {"下推", "确认", "检查"} | STEP_VERBS
+# 子任务可选项：多扣扳机组区别于"顺序执行一串动作"的地方
+STEP_OPTIONS = {"授权", "补偿", "说明", "操作编码", "过滤", "取数"}
 
 
 def _check_steps(op_key: str, steps: list, o, errs: list, warns: list) -> None:
@@ -36,9 +38,40 @@ def _check_steps(op_key: str, steps: list, o, errs: list, warns: list) -> None:
                         f"只能是 下推 / 确认 / {' / '.join(sorted(STEP_VERBS))}。")
             continue
 
+        # 可选项先统一校验
+        unknown = set(st) - {"做", "从", "到", "对象", "用", "问", "条件"} - STEP_OPTIONS
+        if unknown:
+            errs.append(f"{where}：不认识的字段 {sorted(unknown)}。"
+                        f"可选项只有 {sorted(STEP_OPTIONS)}。")
+        if "补偿" in st:
+            if kind in ("确认", "检查"):
+                errs.append(f"{where}：『{kind}』不写数据，不需要补偿。")
+            elif st["补偿"] not in STEP_VERBS:
+                errs.append(f"{where}：补偿动词 {st['补偿']!r} 不认识，"
+                            f"只能是 {' / '.join(sorted(STEP_VERBS))}。")
+        if "授权" in st and not st["授权"]:
+            errs.append(f"{where}：写了『授权』但值是空的。"
+                        f"要么去掉，要么写 true（任何人可批）或角色名（如 财务主管）。")
+
         if kind == "确认":
             if not st.get("问"):
                 errs.append(f"{where}：『确认』必须写『问』，即要让人确认什么。")
+            continue
+
+        if kind == "检查":
+            if not st.get("对象") or not st.get("条件"):
+                errs.append(f"{where}：『检查』必须写『对象』和『条件』，"
+                            f"如 {{做: 检查, 对象: 即时库存, 条件: \"FBaseQty >= 1\"}}。")
+                continue
+            try:
+                o.check_verb_applies("query", st["对象"])
+            except OntologyError as e:
+                errs.append(f"{where}：{e}")
+            from saga.engine import SagaError, eval_condition
+            try:
+                eval_condition(st["条件"], [])
+            except SagaError as e:
+                errs.append(f"{where}：{e}")
             continue
 
         if kind == "下推":
@@ -120,6 +153,25 @@ def validate(tenant: str) -> tuple[list[str], list[str]]:
         if not spec.get("owner"):
             warns.append(f"操作『{key}』没写 owner（责任部门），出问题时不知道找谁。")
         steps = spec.get("steps") or []
+        # 只对**实际退不回来**的写步骤提醒。补偿默认从本体的动词定义继承，
+        # 对继承来的步骤报"没声明"是误报——会逼着人在 profile 里重抄一遍，
+        # 而重抄正是第二个事实来源的来源。
+        from saga.engine import _verb_of_kind
+        no_comp = []
+        for i, st in enumerate(steps):
+            if not isinstance(st, dict) or st.get("做") in ("确认", "检查"):
+                continue
+            eff = st["补偿"] if "补偿" in st else (
+                (o.verbs.get(_verb_of_kind(st.get("做", ""))) or None)
+                and o.verbs[_verb_of_kind(st["做"])].compensation)
+            if not eff:
+                no_comp.append(i + 1)
+        if no_comp:
+            warns.append(
+                f"操作『{key}』第 {no_comp} 步**退不回来**"
+                f"（这些动词在本体里没有 compensation）。"
+                f"多扣扳机组里只要后面有一步失败，它们就只能人工收拾——"
+                f"确认这是可接受的，或把它们挪到组的最后。")
         risky = [s.get("做") for s in steps if isinstance(s, dict)
                  and s.get("做") in ("delete", "void", "close")]
         if risky and not spec.get("confirm") and not any(

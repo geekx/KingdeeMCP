@@ -59,11 +59,23 @@ operations:
     owner: 财务部
     desc: 已审核的销售订单 → 生成开票申请 → 提交审核 → 生成应收单。
     confirm: true                      # 涉及金额，执行前必须让人确认
+    # 这是一个「多扣扳机组」：几步必须一起看，不能各自为政。
+    #
+    # 注意这里**没有写 `补偿:`** —— 每个动词能不能退、怎么退，
+    # 是本体的事实（base/registry.yml:verbs 的 compensation 字段），
+    # 自动继承即可。在这里重抄一遍只会制造第二个事实来源，
+    # 两处一旦不一致就没人知道哪个算数。
+    # 只有本租户确实要用不同的退法时，才显式写 `补偿:` 覆盖。
     steps:
       - {做: 确认, 问: "将对这些销售订单生成开票申请并过账应收，确认继续？"}
+      # 守卫：源单必须真的已审核，别拿一张暂存单去开票
+      - {做: 检查, 对象: SAL_SaleOrder, 条件: "FDocumentStatus = 'C'",
+         说明: 只对已审核的销售订单开票}
       - {做: 下推, 从: SAL_SaleOrder, 到: PAEZ_CustomInvoice}
       - {做: submit, 对象: PAEZ_CustomInvoice, 用: 上一步产物}
-      - {做: audit,  对象: PAEZ_CustomInvoice, 用: 上一步产物}
+      # 过账应收是钱的事，单独要一次授权——开头那次确认不该覆盖它
+      - {做: audit, 对象: PAEZ_CustomInvoice, 用: 上一步产物,
+         授权: 财务主管, 说明: 审核后即产生应收，需主管放行}
       - {做: 下推, 从: PAEZ_CustomInvoice, 到: AR_Receivable}
 
   采购收货入库:

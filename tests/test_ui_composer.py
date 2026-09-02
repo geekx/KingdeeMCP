@@ -79,6 +79,41 @@ async def main():
         await pg.select_option('#arg1', o2[4]); await pg.wait_for_timeout(150)
         await pg.fill('#opname', '采购收货'); await pg.wait_for_timeout(250)
         res['survives_text_input'] = (await pg.eval_on_selector('#arg1', 'e=>e.value')) == o2[4]
+        # ── 图与表单共存：两个入口改同一份步骤 ──────────────────
+        n0 = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+        # (a) 图上点箭头加一步
+        edges = await pg.eval_on_selector_all(
+            '#cgraph g.plus[data-edge]', 'e=>e.map(g=>g.dataset.edge)')
+        res['has_graph'] = len(edges) > 0
+        # 点线中点的"＋"按钮——它画在节点之后，不会被节点框挡住
+        await pg.click('#cgraph g.plus[data-edge="%s"]' % edges[0])
+        await pg.wait_for_timeout(250)
+        n1 = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+        res['graph_click_adds_to_shared_list'] = n1 == n0 + 1
+        # 图上加的一步，表单侧的步骤列表与 YAML 都要看得见
+        y3 = await pg.eval_on_selector('#yaml', 'e=>e.textContent')
+        gf, gt = edges[0].split('|')
+        res['graph_step_in_yaml'] = (gf in y3 and gt in y3)
+
+        # (b) 再用表单加一步下推，图必须跟着走——选中点应落到新的终点
+        await pg.select_option('#stepkind', '下推'); await pg.wait_for_timeout(250)
+        o3 = await pg.eval_on_selector_all('#arg1 option', 'e=>e.map(o=>o.value)')
+        pick2 = o3[1]
+        await pg.select_option('#arg1', pick2); await pg.wait_for_timeout(150)
+        await pg.click('#addstep'); await pg.wait_for_timeout(300)
+        n2 = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+        res['form_click_adds_to_shared_list'] = n2 == n1 + 1
+        sel_nodes = await pg.eval_on_selector_all(
+            '#cgraph [data-sel="1"]', 'e=>e.map(g=>g.dataset.node)')
+        res['graph_follows_form'] = sel_nodes == [pick2.split('|')[1]]
+        res['selected_nodes'] = sel_nodes
+        res['expected_node'] = pick2.split('|')[1]
+
+        # (c) 删一步也要两边同步
+        await pg.click('#steps [data-del="0"]'); await pg.wait_for_timeout(250)
+        n3 = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+        res['delete_syncs'] = n3 == n2 - 1
+
         res['yaml'] = await pg.eval_on_selector('#yaml', 'e=>e.textContent')
         res['errors'] = [e for e in errs if 'ERR_CONNECTION' not in e]
         await b.close()
@@ -137,6 +172,42 @@ class TestComposerDropdowns:
     def test_typing_elsewhere_does_not_clobber_selection(self, ui):
         """在别处打字不该冲掉控件区的选择——这正是原 bug 的触发方式。"""
         assert ui["survives_text_input"] is True
+
+
+class TestGraphAndFormCoexist:
+    """图和表单不是二选一，是同一份步骤的两个入口。
+
+    图上点适合顺着下推链走；确认、动词、守卫这些链上没有的步骤只能从
+    表单补。所以两边必须改同一个列表、并且互相看得见对方的改动——
+    否则就是同一份文档开了两个编辑器，各说各话。
+    """
+
+    def test_graph_is_rendered(self, ui):
+        assert ui["has_graph"] is True, "编排页没有链路图，节点入口根本不存在"
+
+    def test_graph_click_feeds_the_shared_step_list(self, ui):
+        assert ui["graph_click_adds_to_shared_list"] is True, (
+            "在图上点箭头没有加进表单侧的步骤列表——两边不是同一份 steps")
+
+    def test_graph_step_reaches_the_same_yaml(self, ui):
+        assert ui["graph_step_in_yaml"] is True, "图上加的一步没有进 YAML"
+
+    def test_form_click_feeds_the_shared_step_list(self, ui):
+        assert ui["form_click_adds_to_shared_list"] is True, (
+            "表单加的一步没进共用列表")
+
+    def test_graph_follows_steps_added_from_the_form(self, ui):
+        """表单加了一步下推，图上的选中点要跟着走到新终点。
+
+        这是共存的关键：早先只有图 → 表单单向同步，从表单加完步骤后图
+        还停在原处，接着在图上点就会从错误的起点接下去。
+        """
+        assert ui["graph_follows_form"] is True, (
+            f"表单加完步骤后图没跟上：选中 {ui['selected_nodes']}，"
+            f"应为 [{ui['expected_node']!r}]")
+
+    def test_delete_syncs_both_entrances(self, ui):
+        assert ui["delete_syncs"] is True, "删步骤后两边没同步"
 
     def test_generated_yaml_is_valid_profile(self, ui, tmp_path, monkeypatch):
         """编排器产出的 YAML 必须真能过校验器，不是"看着像"。"""

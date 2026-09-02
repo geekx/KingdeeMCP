@@ -240,21 +240,73 @@ async def kd_report(params: ReportInput) -> str:
 # ── 7. 业务操作入口 ──────────────────────────────────────────────
 class RunOpInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: str = Field(description="业务操作名，见 kd_describe(what='operations')")
-    targets: list[str] = Field(description="起始单据（编号或 FID）")
+    operation: str = Field(default="", description="业务操作名，见 kd_describe(what='operations')")
+    targets: list[str] = Field(default_factory=list, description="起始单据（编号或 FID）")
     confirmed: bool = Field(default=False, description="是否已获得人的确认")
+    run_id: str = Field(default="", description="续跑：授权之后回来接着走")
 
 
 @mcp.tool(name="kd_run", annotations={
     "title": "执行业务操作", "readOnlyHint": False, "destructiveHint": True})
 @_guard
 async def kd_run(params: RunOpInput) -> str:
-    """执行本租户定义的业务操作（如『销售开票』『采购收货入库』）。
+    """执行本租户定义的业务操作（如『销售开票』『采购收货入库』）—— 走 Saga 引擎。
 
-    未确认时**不做任何写操作**，只返回执行计划和待确认问题。
-    中途失败立即停止，并明确列出已产生的中间态单据（left_behind）。"""
+    这不是「顺序打一串动作」，而是一个**多扣扳机组**：
+      守卫  `检查` 步骤在写之前先验条件（有没有货、单是不是已审核），不满足就不往下走；
+      授权  标了『授权』的子任务会各自停下来等人批 —— 开头确认一次**不等于**全权委托；
+      补偿  任一步失败，已生效的写步骤按**逆序**补偿掉；
+      续跑  停在授权处时返回 run_id，批准后带 run_id 回来接着走。
+
+    未确认时不做任何写操作，只返回执行计划。
+    返回体的 state 是关键：awaiting_auth（等人批）/ done / compensated（已退干净）
+    / halted（停了但有东西没退）/ compensation_failed（**最坏，必须人工处理**）。"""
     return _fmt(await _d().run_operation(params.operation, params.targets,
-                                         confirmed=params.confirmed))
+                                         confirmed=params.confirmed,
+                                         run_id=params.run_id or None))
+
+
+class SagaInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(default="list", description="list(未了结的运行) | status | authorize")
+    run_id: str = Field(default="")
+    by: str = Field(default="", description="授权人姓名。授权必须记名——谁批的要能查到")
+    approve: bool = Field(default=True, description="false 表示拒绝这一步")
+    reason: str = Field(default="", description="拒绝理由")
+    step: Optional[int] = Field(default=None, description="第几步（0 基）。默认当前停住的那步")
+    all: bool = Field(default=False, description="list 时连已了结的一起列")
+
+
+@mcp.tool(name="kd_saga", annotations={
+    "title": "多扣扳机组：授权与清算", "readOnlyHint": False, "destructiveHint": False})
+@_guard
+async def kd_saga(params: SagaInput) -> str:
+    """管理多扣扳机组的运行：看谁在等授权、批准或拒绝某一步、查某次运行的状态。
+
+      kd_saga(action="list")                             还有哪些没了结
+      kd_saga(action="status", run_id="…")               某次运行到哪了
+      kd_saga(action="authorize", run_id="…", by="张三")  批准当前停住的那一步
+      kd_saga(action="authorize", run_id="…", by="张三", approve=False, reason="金额不对")
+
+    **等授权的运行最容易被忘掉**——放着不管，已生效的写操作就成了无人认领的
+    中间态。定期 list 一下。"""
+    d = _d()
+    if params.action == "list":
+        return _fmt(d.saga_list(only_unresolved=not params.all))
+    if params.action == "status":
+        run = d.saga.store.get(params.run_id)
+        if run is None:
+            return _fmt({"ok": False, "error": f"找不到运行 {params.run_id}"})
+        return _fmt(d.saga.report(run))
+    if params.action == "authorize":
+        if not params.by:
+            return _fmt({"ok": False,
+                         "error": "授权必须记名：by 不能为空——谁批的要能查到。"})
+        return _fmt(d.authorize_step(params.run_id, by=params.by,
+                                     approve=params.approve, reason=params.reason,
+                                     step=params.step))
+    return _fmt({"ok": False, "error": f"未知 action={params.action!r}，"
+                                       f"可用：list / status / authorize"})
 
 
 # ── 8. 过程操作审计 ──────────────────────────────────────────────
