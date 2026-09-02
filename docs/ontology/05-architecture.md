@@ -1,0 +1,251 @@
+# 三层架构：MCP 底座 / Skill 实例层 / WikiSkill 自优化层
+
+> 本文回应四条设计要求：
+> ① MCP 作为底座，抽象出调用能力与状态这些五元的基座；
+> ② 五元的实例通过 Skill 操作分离；
+> ③ 引入 WikiSkill 理念，回溯每日工作做自优化；
+> ④ 接口稳健、独立，避免过多 token 消耗；
+> ⑤ 各家表单不同，需要面向人的业务操作入口定义，避免一种米养几种人。
+
+## 0. 一张图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  WikiSkill 自优化层        wikiskill/                        │
+│  每日回溯审计记录 → 累积知识 → 跨天印证才浮上来 → 人 adopt    │
+└───────────────▲──────────────────────────┬──────────────────┘
+                │ operation_audit.jsonl    │ 改注册表/配置/代码
+                │                          ▼
+┌───────────────┴─────────────────────────────────────────────┐
+│  Skill 实例层              skill/ · profiles/                │
+│  · kingdee-ontology  怎么用底座（渐进披露，SKILL.md 很小）    │
+│  · profiles/<租户>/  这家长什么样（二开表单/操作码/链接）     │
+│                      这家怎么干活（业务操作入口，中文）       │
+└───────────────┬─────────────────────────────────────────────┘
+                │ 注册表驱动，无需改代码
+┌───────────────▼─────────────────────────────────────────────┐
+│  MCP 底座                  base/                             │
+│  7 个通用工具 = 14 动词 × N 名词的组合                        │
+│  契约（原子性/幂等/逆动词）· 状态机 · 前置规则 · 审计记录     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 1. 为什么要拆：token 账
+
+实测当前实现的工具面：
+
+| | 工具数 | tools/list 体积 | 估算 token | 占 200k 上下文 |
+|---|---|---|---|---|
+| 原结构 | 97 | 174 KB | **~45,873** | 23% |
+| 底座 | 7 | 3.3 KB | **~1,171** | 0.6% |
+| | | | **-97.4%** | |
+
+复现：
+
+```bash
+python3 tools/ontology/measure_tool_surface.py            # 原结构
+python3 tools/ontology/measure_tool_surface.py --base     # 底座
+```
+
+45,873 token 是**每次会话开口之前就要付的固定成本**，其中 60% 是 97 份 `inputSchema`。
+更糟的是它随业务增长线性上涨：每接一个新单据类型就多一个工具。
+
+根因是**把实例当成了能力**。`kingdee_query_purchase_orders` 和
+`kingdee_query_sale_orders` 不是两种能力，是同一种能力（查询）作用在两个名词上。
+97 个工具其实只有 14 个动词。
+
+## 2. 底座：能力是代码，实例是数据
+
+`base/registry.yml` 是唯一事实来源：14 动词 / 48 名词 / 11 状态 / 9 链接 / 3 规则。
+**新增一个单据类型只改这份 YAML，不加工具、不涨 token。**
+
+七个工具：
+
+| 工具 | 作用 |
+|---|---|
+| `kd_describe` | 按需查本体 —— 把实例从常驻 schema 变成拉取 |
+| `kd_query` | 查询（字段留空即用该名词默认字段集） |
+| `kd_act` | 全部写动词的统一入口 |
+| `kd_push` | 下推，校验链接表 |
+| `kd_run` | 执行租户定义的业务操作 |
+| `kd_audit` | 查过程审计与未清算的中间态 |
+| `kd_check_profile` | 校验租户配置，中文报错 |
+
+### 契约随结果返回（修审计 A-2）
+
+原实现里 `kingdee_audit_bills`（逐条、部分成功）和 `kingdee_void_bills`
+（一次提交、原子性未知）在 MCP 类型系统里长得一模一样 —— 因为 MCP 只有
+`readOnlyHint/destructiveHint/idempotentHint`，**没有 arity 和 atomicity**。
+
+底座把这两项补进契约，并且**每次调用都随结果返回**：
+
+```json
+{"contract": {"arity": "batch", "atomicity": "per_item",
+              "idempotent": false, "destructive": false, "inverse": "cancel"},
+ "outcome": "partial", "succeeded": ["100"], "failed": ["101"],
+ "tip": "部分成功：1 成 / 1 败，且**已成功的部分不会回滚**。重试前请只针对 failed 中的目标。"}
+```
+
+`destructive` 不再靠人工标注，而是从「有无逆动词」推导 —— 这直接消除了审计
+N-1 里「同一底层操作被标成两种破坏性」的可能。
+
+### 前置规则真的在发请求前拦截（修 MISS-01/02/03）
+
+审计指出原 harness 的 4 条规则全是 `chain` 类：CI 里事后读日志，运行期不参与决策。
+底座把三条约束前移到发请求之前：
+
+```
+kd_act(verb="audit", noun="BD_Material", ...)
+→ {"blocked_by": "precondition",
+   "error": "动词 'audit'(审核) 不适用于 BD_Material(物料)：基础资料没有审核流…
+             可用动词：['enable','forbid','query','read','save']"}
+```
+
+一次网络往返都没发生。错误信息自带修正建议，调用方不必再花一轮问。
+
+### 独立可测
+
+`base/` 不导入 `kingdee_mcp.server` 那 7000 多行。传输层是一个两方法的
+`Transport` 协议，测试注入 `FakeTransport` 即可跑完整分发逻辑。
+默认实现懒加载复用已加固的 `_post_raw`（含 A-3 的会话重放修复）。
+
+## 3. Skill 实例层：渐进披露 + 租户覆盖
+
+### 用法知识放 Skill，不放 schema
+
+`skill/kingdee-ontology/SKILL.md` 讲**怎么用底座**：先查本体、看懂 contract、
+危险动作要确认、`unknown` 不等于失败。细节在 `references/` 里按需加载。
+
+### 租户差异放覆盖层（回应⑤）
+
+各家的云星空都做过二开：表单标识、操作编码、下推关系、字段名都不同。
+与其为每家改代码，不如让每家描述自己的差异：
+
+```
+profiles/<租户>/profile.yml     ← 只写与标准不同的部分
+export KINGDEE_TENANT=<租户>    ← 同一份代码服务不同账套
+```
+
+合并策略刻意保守：**覆盖层只能新增或改写，不能删除底座条目** ——
+删除会让通用流程在某些租户上静默失效，比报错更难排查。
+`SAL_SaleOrder` 只想多带一个项目号字段，就只写 `default_fields` 一行，
+其余（可用动词、状态、原子性）自动继承。
+
+### 面向人的业务操作入口
+
+最关键的一段是 `operations`。业务人员用自己的话给一件事命名：
+
+```yaml
+operations:
+  销售开票:
+    owner: 财务部
+    confirm: true
+    steps:
+      - {做: 确认, 问: "将对这些销售订单生成开票申请并过账应收，确认继续？"}
+      - {做: 下推, 从: SAL_SaleOrder, 到: PAEZ_CustomInvoice}
+      - {做: submit, 对象: PAEZ_CustomInvoice, 用: 上一步产物}
+      - {做: audit,  对象: PAEZ_CustomInvoice, 用: 上一步产物}
+```
+
+之后直接说「帮我做**销售开票**，订单 XSDD001」就能用。
+`python3 -m base.validate_profile <租户>` 用中文校验，错在哪一步、该怎么改都说清楚。
+填写指南见 [`profiles/README.md`](../../profiles/README.md)，是写给业务人员的，不是写给工程师的。
+
+### 与原「一站式」复合工具的区别（修审计 A-1）
+
+`kingdee_create_and_audit` 中途失败时返回一段 `recovery_hint` 文本，
+把补偿责任交给 LLM 的自觉。`kd_run` 不同：
+
+| | 原复合工具 | `kd_run` |
+|---|---|---|
+| 执行前 | 直接开跑 | 含不可逆动作时**先返回计划等人确认，不做任何写操作** |
+| 每步留痕 | 无 | 一条审计记录，共享同一 `trace_id` |
+| 中途失败 | 文本建议 | `halted_at` + **`left_behind` 明确列出中间态单据** |
+| 事后 | 无从查起 | `kd_audit(scope="dangling")` 随时查未清算的中间态 |
+
+补偿仍需人或后续动作完成 —— 但中间态从"只存在于返回体文本"变成了**可查询、可清算的事实**。
+
+## 4. WikiSkill：让每天的失败变成明天的改进
+
+```
+kd_act / kd_push / kd_run  →  operation_audit.jsonl
+                                    ↓  python3 -m wikiskill.retro
+                          wikiskill/knowledge.json（累积证据、涨置信度）
+                                    ↓  达到 medium 才浮上来
+              改 base/registry.yml · profiles/<租户>/profile.yml · 代码
+                                    ↓
+                          下次回溯该现象消失 → 条目自然沉底
+```
+
+### 「wiki」的含义是累积，不是生成
+
+每次回溯不是重写报告，而是把新证据**并进已有条目**。条目 id 由现象本身算出，
+跨次运行稳定，所以同一个问题不会每天新建一条。
+
+置信度 = 出现次数 × 覆盖天数：
+
+| 置信度 | 门槛 | 含义 |
+|---|---|---|
+| `noise` | 默认 | 只出现过一两次，先攒证据，不打扰人 |
+| `low` | ≥2 次 | 有苗头 |
+| `medium` | ≥5 次且跨 ≥2 天 | **浮上来，值得动手** |
+| `high` | ≥10 次且跨 ≥3 天 | 长期规律 |
+
+单日刷屏不等同于长期规律，所以刻意要求跨天。实测：同一个「批号不能为空」
+第一天 3 次不上榜，第二天再 3 次即升到 `medium` 并给出具体建议。
+
+### 只提议，不自动改
+
+自动改 ERP 的操作定义是危险的。机器只负责积累证据和给建议，落地要人点头：
+
+```bash
+python3 -m wikiskill.retro                       # 每日回溯
+python3 -m wikiskill.retro --adopt <id>          # 采纳
+python3 -m wikiskill.retro --reject <id> --note "业务上就是这样"
+```
+
+**被 reject 的条目不会复活。** 计数继续累积，但不再刷屏 ——
+否则每天都会重新提一遍同样的建议，人很快就不看了。
+
+### 五条提炼规则
+
+| 规则 | 提炼什么 | 建议指向 |
+|---|---|---|
+| `failure_pattern` | 反复失败的 (名词, 动词, 错误) | 补 `KNOWN_ERROR_PATTERNS` / 补字段模板 / 补 `requires_state` |
+| `dangling` | 反复停在同一步的操作 | 短期人工清理，长期加确认或补偿 |
+| `flaky` | `outcome=unknown` | 排查超时；长期给 save/push 加幂等键（A-5） |
+| `unlinked_push` | 被 PRE-02 拦下的下推 | 补租户 `links`，或固化正确链路 |
+| `slow` | 超过 5s 的操作 | 收窄字段集、减小批量 |
+
+## 5. 迁移路径
+
+底座与原 97 工具**并存**，不是替换：
+
+1. 原 `src/kingdee_mcp/server.py` 一行未删，现有集成不受影响；
+2. 新集成挂 `base/server.py`（`python3 -m base.server`），token 成本降 97%；
+3. 覆盖率不足时（底座 14 动词覆盖不了的长尾查询），仍可回落到原工具；
+4. WikiSkill 的回溯同时读两边的日志。
+
+## 6. 目录
+
+```
+base/                    MCP 底座
+  registry.yml           唯一事实来源：动词/名词/状态/链接/规则
+  ontology.py            本体 + 前置规则 + 租户覆盖层合并
+  dispatch.py            通用动词分发 + 业务操作执行
+  transport.py           传输抽象（可注入，便于独立测试）
+  server.py              7 个 MCP 工具
+  validate_profile.py    租户配置校验（中文报错）
+profiles/
+  README.md              面向业务人员的填写指南
+  example-tenant/        示例：二开表单 + 自定义操作码 + 业务操作入口
+skill/kingdee-ontology/  Skill 实例层（渐进披露）
+wikiskill/
+  knowledge.py           知识条目：累积、置信度、状态
+  retro.py               每日回溯与自优化
+tools/ontology/
+  operation_audit.py     过程操作审计记录器
+  measure_tool_surface.py  token 成本实测
+  audit_atomicity.py     原子性审计（CI）
+  extract_ontology.py    从代码抽取本体实例
+```

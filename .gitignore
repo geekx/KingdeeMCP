@@ -47,3 +47,8 @@ temp_crud/
 
 # WorkBuddy project memory (internal, not for open source)
 .workbuddy/
+
+# 运行期产物（过程操作审计与自优化知识库）
+operation_audit.jsonl
+usage_log.jsonl
+wikiskill/knowledge.json

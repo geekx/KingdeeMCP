@@ -24,8 +24,26 @@
 | [`02-ontology-instances.md`](02-ontology-instances.md) | 实例层：从代码抽取的 48 名词 / 20 动词 / 10 状态 / 13 链接 |
 | [`03-operation-audit-record.md`](03-operation-audit-record.md) | **过程操作审计记录规范** + 接入方式 |
 | [`04-audit-trail.md`](04-audit-trail.md) | 审计过程记录：方法、证据链、边界、审计器自身的盲区 |
+| [`05-architecture.md`](05-architecture.md) | **三层架构**：MCP 底座 / Skill 实例层 / WikiSkill 自优化层 |
 | [`model/`](model/) | 机器可读本体：`nouns` `verbs` `states` `links` `rules` + 实例快照 |
 | [`samples/`](samples/) | 审计记录样本 JSONL |
+
+## 落地：三层架构
+
+审计只说问题，[`05-architecture.md`](05-architecture.md) 给出重构方案并已实现：
+
+| 层 | 位置 | 解决什么 |
+|---|---|---|
+| MCP 底座 | `base/` | 97 工具 → 7 通用工具，**tools/list 从 ~45,873 token 降到 ~1,171（-97%）**；契约随结果返回；前置规则在发请求前拦截 |
+| Skill 实例层 | `skill/` `profiles/` | 用法知识渐进披露；**各家二开差异写在租户覆盖层**，业务人员用中文定义业务操作入口 |
+| WikiSkill 自优化 | `wikiskill/` | 每日回溯审计记录 → 跨天印证才浮上来 → 人 adopt 后落地 |
+
+```bash
+python3 tools/ontology/measure_tool_surface.py --both   # 复现 token 账
+python3 -m base.server                                  # 启动底座
+python3 -m base.validate_profile example-tenant         # 校验租户配置
+python3 -m wikiskill.retro                              # 每日回溯
+```
 
 ## 工具
 

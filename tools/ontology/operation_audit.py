@@ -189,7 +189,9 @@ def _identify(records: list[dict]) -> list[str]:
             continue
         key = (r["noun"], oid or ono)
         seen[key] = seen.get(key) or ono
-    return sorted(f"{noun}:{label or ident}" for (noun, ident), label in seen.items())
+    # 同一张单可能在一步里只留了 FID、另一步只留了单据编号；
+    # 补全编号后按最终标识去重，避免同一对象被数成两个。
+    return sorted({f"{noun}:{label or ident}" for (noun, ident), label in seen.items()})
 
 
 def dangling_traces(records: list[dict]) -> list[dict]:
