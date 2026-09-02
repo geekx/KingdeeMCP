@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from aip import Decision
+from aip.logic import NEEDS_OPERATION_CODE, can as aip_can
 from base.ontology import Noun, Ontology, OntologyError, Verb
 
 # 动词 → 参数 schema。UI 据此生成表单，Skill 据此知道要问用户什么。
@@ -38,8 +40,9 @@ _ACTION_PARAMS: dict[str, list[dict]] = {
 _DEFAULT_PARAMS = [
     {"name": "targets", "type": "ids", "required": True, "label": "单据内码 FID"},
 ]
-# 这几个动词随表单而异，二开单常需显式指定操作编码
-_NEEDS_OPERATION = {"void", "close", "unclose", "forbid", "enable", "cancel"}
+# 这几个动词随表单而异，二开单常需显式指定操作编码。
+# 单一出处在判断层（aip.logic），这里只是取别名——两处各留一份迟早会分叉。
+_NEEDS_OPERATION = NEEDS_OPERATION_CODE
 
 
 @dataclass
@@ -55,24 +58,39 @@ class ActionType:
     idempotent: bool
     inverse: Optional[str]
     destructive: bool
+    # 判断要靠本体，不能只靠这张卡片自己知道的几个字段。原来的
+    # availability() 自带一份状态比对逻辑，与 check_state 各写一遍；
+    # 卡片还漏报了两件执行时才知道的事（不可逆、需操作编码）。
+    ontology: Any = field(default=None, repr=False, compare=False)
 
     @property
     def needs_confirmation(self) -> bool:
         """无逆动词的写动作必须先让人点头。"""
         return self.destructive
 
+    def decide(self, current_state: Optional[str] = None) -> Decision:
+        """判断层的完整结论。UI 之外的调用方应当读这个，而不是 availability()。"""
+        return aip_can(self.ontology, self.verb, self.object_type, state=current_state)
+
     def availability(self, current_state: Optional[str]) -> dict:
         """此刻能不能做。不能做时必须说清**为什么**和**怎么办**——
-        一个灰掉却不解释的按钮比没有按钮更让人困惑。"""
-        if not self.requires_state:
-            return {"enabled": True}
-        if current_state is None:
-            return {"enabled": True, "unverified": True,
-                    "note": f"未知当前状态，无法预判。本动作要求 {list(self.requires_state)}"}
-        if current_state in self.requires_state:
-            return {"enabled": True}
-        return {"enabled": False,
-                "reason": f"要求 {list(self.requires_state)} 之一，当前是 {current_state}"}
+        一个灰掉却不解释的按钮比没有按钮更让人困惑。
+
+        这里是判断层结论的**界面投影**，两者刻意不同义：
+          enabled  按钮点不点得动。状态未知时仍可点（点了会先去查），
+                   所以它比 Decision.allowed 宽松。
+          unverified  这个"能点"是没核实过的。
+        程序判断请用 decide()——`allowed` 在事实不全时为 False，
+        不会把"不知道"读成"可以"。
+        """
+        d = self.decide(current_state)
+        out: dict = {"enabled": not d.blocks}
+        if d.blocks:
+            out["reason"] = "；".join(r.text for r in d.blocks)
+        if d.undetermined:
+            out["unverified"] = True
+            out["note"] = "；".join(r.text for r in d.undetermined)
+        return out
 
     def to_dict(self) -> dict:
         return {"verb": self.verb, "zh": self.zh, "object_type": self.object_type,
@@ -196,7 +214,8 @@ class ObjectModel:
                 verb=v.name, zh=v.zh, object_type=n.form_id, params=params,
                 requires_state=v.requires_state, to_state=v.to_state,
                 atomicity=v.atomicity, idempotent=v.idempotent,
-                inverse=v.inverse, destructive=v.destructive))
+                inverse=v.inverse, destructive=v.destructive,
+                ontology=self.o))
         return out
 
     def _links_for(self, n: Noun) -> list[LinkRef]:

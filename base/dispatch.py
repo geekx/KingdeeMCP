@@ -129,6 +129,12 @@ class Dispatcher:
             raise OntologyError(f"{verb} 是只读动词，请用 kd_query / kd_read。")
         warn = self.o.check_state(verb, current_state)
 
+        # 判断层的忠告（AIP-04 不可逆 / AIP-05 需操作编码）。这些不阻断，
+        # 但要随结果一起交出去：二开环境里最常见的一类"参数都对却报错"
+        # 就出在操作编码上，事前一句提醒远好过事后翻日志。
+        advice = self.o.decide(v.name, n.form_id, state=current_state,
+                               params={"operation": operation} if operation else {})
+
         out: dict[str, Any] = {
             "verb": v.name, "noun": n.form_id,
             # 契约随结果一起返回：调用方不必猜这次批量是不是原子的（修 A-2）
@@ -139,6 +145,9 @@ class Dispatcher:
         }
         if warn:
             out["warning"] = warn
+        notes = [r.to_dict() for r in advice.reasons if r.rule.startswith("AIP-")]
+        if notes:
+            out["advisories"] = notes
 
         ctx = (_Reuse(self._op_ctx) if self._op_ctx is not None
                else audit_recorder.operation(f"kd_act:{v.name}", actor=self.actor,

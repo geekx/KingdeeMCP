@@ -403,11 +403,59 @@ kd_act → 索引标脏 + 审计留痕 → 每日回溯提炼 → 人 adopt → 
 守卫的条件表达式刻意只支持 `字段 运算符 值`，不支持任意表达式：
 把一个求值器塞进配置文件，业务人员写错了很难查。
 
-### 第三层：AIP Logic —— 尚未实现
+### 第三层：AIP Logic（`aip/`）
 
-判断逻辑目前散在各处（`objects.py` 的可用性、`harness/rules.py` 的操作链、
-`validate_profile` 的配置校验）。把它们收拢成**声明式的、以本体为参数的逻辑函数**
-才算这一层。**现在还没做，不要当它已经存在。**
+在这一层之前，「这一步能不能做」有**四种答法**，各长在一处：
+
+| 位置 | 答法 |
+|---|---|
+| `base/ontology.py` 的 `check_*` | 抛 `OntologyError` |
+| `base/objects.py` 的 `availability()` | `{"enabled": ..., "reason": ...}` |
+| `base/validate_profile.py` | 追加到 `errs` / `warns` 两个列表 |
+| `saga/engine.py` 守卫 | 又一套 |
+
+四份实现回答同一个问题，于是它们**可以彼此矛盾而没人发现**。
+
+这一层把判断收拢成声明式、以本体为参数的**纯函数**：
+
+| 文件 | 职责 |
+|---|---|
+| `decide.py` | `Reason` / `Decision` 结果类型 |
+| `logic.py` | 逻辑函数 + 注册表 + `evaluate()` |
+
+三个刻意的设计：
+
+- **一次给全部理由，不短路。** 短路省几微秒，代价是调用方改完第一个问题、
+  再调一次、撞上第二个——对 agent 那是一整轮重新思考。三个前置条件本来
+  就是三个来回，现在是一个。
+- **「不知道」不等于「可以」。** 旧的 `availability()` 在状态未知时返回
+  `{"enabled": True, "unverified": True}`，只读 `enabled` 的调用方看到 `True`
+  就往下走。`Decision` 把它拆成独立的 `undetermined`，且此时 `allowed` 为
+  `False`——要放行必须显式接受不确定性，而不是没注意到它。
+- **纯函数。** 不发请求、不读文件、不看时钟，所以能离线跑、能在 CI 里跑、
+  能做成毫秒级的独立服务（见 §6）。`tests/test_aip.py` 用静态检查守着这条。
+
+已登记的逻辑函数：
+
+| 函数 | 规则 | 严重度 | 管什么 |
+|---|---|---|---|
+| `verb_applies` | PRE-01 | block | 动词是否适用于该名词 |
+| `link_registered` | PRE-02 | block | 下推关系是否已登记 |
+| `state_satisfied` | PRE-03 | block / undetermined | 当前状态是否满足动词要求 |
+| `irreversible` | AIP-04 | warn | 没有逆动词，做完退不回来 |
+| `needs_operation_code` | AIP-05 | info | 二开单常需显式操作编码 |
+| `step_compensable` | SAGA-03 | warn / info | Saga 写步骤是否备有补偿 |
+
+**收拢是否真的发生，由机器守。** `tests/test_aip.py::TestSingleSourceOfTruth`
+双向校验注册表的 `decided_by` 指针：指到的函数必须存在（重构改名不会静默失效），
+且每个逻辑函数必须挂在某条规则下（没有规则背书的判断＝偷偷加的业务约束）。
+
+调用方式（不新增 MCP 工具，省 token）：
+
+```
+kd_describe(what='logic')                              # 有哪些逻辑函数
+kd_describe(what='logic', key='audit@销售订单@Z:暂存')   # 直接判一次
+```
 
 ## 5. 迁移路径
 

@@ -55,6 +55,7 @@ def _guard(fn):
 class DescribeInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     what: str = Field(description="静态本体 verbs|nouns|states|links|rules|operations；"
+                                  "logic（判断层：能不能做+为什么，key='动词@名词[@状态]'）；"
                                   "实时元数据 fields（对账套拉该单据的真实字段清单）；"
                                   "template（已验证的 model 骨架，用于新建单据）")
     key: Optional[str] = Field(default=None, description="具体条目；支持中文名/别名")
@@ -68,6 +69,9 @@ async def kd_describe(params: DescribeInput) -> str:
     下推关系(links)、规则(rules)、本租户的业务操作入口(operations)。
 
     先用 what='operations' 看有没有现成的业务操作；没有再用 nouns/verbs 自己组。
+
+    拿不准某一步能不能做时，用 what='logic'、key='动词@名词[@当前状态]' 直接问，
+    一次拿到全部理由和补救办法——比拉全量本体自己推便宜得多，也不会推错。
     不带 key 返回清单，带 key 返回该条目详情（含可用动词、可下推目标）。
 
     what='fields' 走实时元数据：返回该单据在**本账套**的真实字段清单与必填项，

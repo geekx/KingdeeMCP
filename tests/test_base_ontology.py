@@ -101,8 +101,27 @@ class TestPreconditions:
         assert "B:审核中" in str(e.value)
 
     def test_unknown_state_degrades_to_warning(self, base_o):
-        """刻意不自动补一次查询——那会让每个写操作的往返翻倍。"""
-        assert "跳过状态校验" in base_o.check_state("audit", None)
+        """刻意不自动补一次查询——那会让每个写操作的往返翻倍。
+
+        断言的是**行为**（不抛异常、返回一句说明所需状态的警告），不是措辞：
+        判断层收拢后文案由 aip 统一给出，把原句写死在这里只会让一次正当的
+        改写看起来像回归。
+        """
+        warn = base_o.check_state("audit", None)
+        assert isinstance(warn, str) and warn, "状态未知时应降级为警告而非放行无声"
+        assert "B:审核中" in warn, "警告里要说清这个动词到底要求什么状态"
+
+    def test_unknown_state_is_not_read_as_allowed(self, base_o):
+        """「不知道」不等于「可以」。
+
+        check_state 为兼容旧调用约定而降级成警告，但严格语义的入口
+        decide() 必须把它记为悬而未决——只读 allowed 的调用方不该被
+        一个未经核实的 True 放过去。
+        """
+        d = base_o.decide("audit", "SAL_SaleOrder", state=None)
+        assert d.undetermined, "缺状态应记为 undetermined"
+        assert d.allowed is False, "事实不全时 allowed 必须为 False"
+        assert not d.blocks, "这不是『明确不行』，只是『判不了』"
 
     def test_suspect_link_still_allowed_but_flagged(self, base_o):
         assert base_o.check_link("PRD_PickMtrl", "PRD_Instock")["verified"] == "suspect"

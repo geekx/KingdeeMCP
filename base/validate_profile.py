@@ -156,15 +156,15 @@ def validate(tenant: str) -> tuple[list[str], list[str]]:
         # 只对**实际退不回来**的写步骤提醒。补偿默认从本体的动词定义继承，
         # 对继承来的步骤报"没声明"是误报——会逼着人在 profile 里重抄一遍，
         # 而重抄正是第二个事实来源的来源。
-        from saga.engine import _verb_of_kind
+        # 判断本身在判断层（AIP-06），这里只负责报告：同一个问题两处各写一遍
+        # 逻辑，迟早在"继承来的补偿算不算数"这种细节上分叉。
+        from aip.logic import Facts, evaluate
         no_comp = []
         for i, st in enumerate(steps):
-            if not isinstance(st, dict) or st.get("做") in ("确认", "检查"):
+            if not isinstance(st, dict):
                 continue
-            eff = st["补偿"] if "补偿" in st else (
-                (o.verbs.get(_verb_of_kind(st.get("做", ""))) or None)
-                and o.verbs[_verb_of_kind(st["做"])].compensation)
-            if not eff:
+            d = evaluate(Facts(ontology=o, step=st), only=["AIP-06"])
+            if d.warnings:
                 no_comp.append(i + 1)
         if no_comp:
             warns.append(
