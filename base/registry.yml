@@ -159,6 +159,11 @@ nouns:
     alias: [物料, 材料, 商品, 产品]
     allowed_verbs: [query, read, save, forbid, enable]
     default_fields: "FMaterialId,FNumber,FName,FSpecification,FUnitID.FName,FMaterialGroup.FName,FDocumentStatus"
+    # ⚠️ legacy 工具 kingdee_query_materials 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FMaterialId,FNumber,FName,FSpecification,FMaterialGroup.FName"
+    legacy_tool: kingdee_query_materials
 
   BD_Customer:
     zh: 客户
@@ -215,6 +220,10 @@ nouns:
     alias: [采购订单, 采购单, PO, 采购合同订单]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FSupplierId.FNumber,FPurchaseDeptId.FName,FPurchaserId.FName,FTaxAmount,FAllAmount,FMaterialId.FName,FMaterialId.FNumber,FQty,FReceiveQty,FStockInQty"
+    # ⚠️ legacy 工具 kingdee_query_purchase_orders 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FPurchaseDeptId.FName,FTaxAmount,FAllAmount,FReceiveQty,FStockInQty"
+    legacy_tool: kingdee_query_purchase_orders
 
   PUR_ReceiveBill:
     zh: 收料通知单
@@ -236,6 +245,11 @@ nouns:
     alias: [采购申请, 申购单, 请购单, 采购需求]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FApplicantDeptId.FName,FTotalAmount"
+    # ⚠️ legacy 工具 kingdee_query_purchase_requisitions 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName"
+    legacy_tool: kingdee_query_purchase_requisitions
 
   PUR_MRAPP:
     zh: 退料申请单
@@ -271,6 +285,11 @@ nouns:
     alias: [询价单, 询价, RFQ, 请求报价]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FExpiryDate"
+    # ⚠️ legacy 工具 kingdee_query_purchase_inquiry 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName"
+    legacy_tool: kingdee_query_purchase_inquiry
 
   SVM_QuoteBill:
     zh: 供应商报价单
@@ -278,6 +297,11 @@ nouns:
     alias: [报价单, 报价, 供应商报价, 报价响应]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice,FQuantity,FDeliveryDate"
+    # ⚠️ legacy 工具 kingdee_query_supplier_quotes 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPrice"
+    legacy_tool: kingdee_query_supplier_quotes
 
   SVM_ComparePrice:
     zh: 比价单
@@ -292,6 +316,11 @@ nouns:
     alias: [销售订单, 销售单, SO, 销售合同]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesOrgId.FName,FSalesManId.FName,FTotalAmount,FLinkQty,FStockOutQty,FDeliQty"
+    # ⚠️ legacy 工具 kingdee_query_sale_orders 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FTotalAmount"
+    legacy_tool: kingdee_query_sale_orders
 
   SAL_OUTSTOCK:
     zh: 销售出库单
@@ -313,6 +342,11 @@ nouns:
     alias: [销售报价, 报价单, SQ, 销售提案]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FCustId.FName,FSalesmanId.FName,FTotalAmount,FExpiryDate"
+    # ⚠️ legacy 工具 kingdee_query_sale_quotations 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FCUSTID.FName,FSalerId.FName,FExpiryDate"
+    legacy_tool: kingdee_query_sale_quotations
 
   SAL_DELIVERYNOTICE:
     zh: 发货通知单
@@ -362,6 +396,11 @@ nouns:
     alias: [调拨, 调拨单, 库存调拨, 仓库调拨]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FStockOutId.FName,FStockInId.FName,FMaterialId.FName,FTransferQty"
+    # ⚠️ legacy 工具 kingdee_query_transfer_direct 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FBillDate,FDocumentStatus,FStockOrgId.FName,FOutStockId.FName,FInStockId.FName,FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FQty,FPrice,FAmount"
+    legacy_tool: kingdee_query_transfer_direct
 
   STK_Inventory:
     zh: 即时库存
@@ -369,6 +408,11 @@ nouns:
     alias: [库存, 即时库存, 库存查询, 现存量]
     allowed_verbs: [query]
     default_fields: "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FStockLocId.FName,FBaseQty,FUnitId.FName"
+    # ⚠️ legacy 工具 kingdee_query_inventory 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FBaseQty,FBaseUnitId.FName"
+    legacy_tool: kingdee_query_inventory
 
   STK_StockCountInput:
     zh: 盘点单
@@ -383,6 +427,11 @@ nouns:
     alias: [调拨申请, 调拨单申请]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSendStockId.FName,FReceiveStockId.FName,FMaterialId.FName,FApplyQty"
+    # ⚠️ legacy 工具 kingdee_query_transfer_apply 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FBillDate,FDocumentStatus,FStockOrgId.FName,FOutStockId.FName,FInStockId.FName,FTransferType,FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FQty,FPrice,FAmount"
+    legacy_tool: kingdee_query_transfer_apply
 
   STK_TRANSFERIN:
     zh: 分布式调入单
@@ -425,6 +474,11 @@ nouns:
     alias: [来料检验, 质检单, 质量检验, IQC, 来料质检]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPassQty,FFailQty,FInspectResult"
+    # ⚠️ legacy 工具 kingdee_query_quality_inspections 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FSupplierId.FName,FMaterialId.FName,FPassQty,FFailQty"
+    legacy_tool: kingdee_query_quality_inspections
 
   AP_Payable:
     zh: 应付单
@@ -460,6 +514,11 @@ nouns:
     alias: [生产订单, 生产单, MO, 工单, 工单生产]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FUnitId.FName,FQty,FStockInQty,FPickMtrlQty,FPlanStartDate,FPlanFinishDate"
+    # ⚠️ legacy 工具 kingdee_query_production_orders 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FNumber,FMaterialId.FName,FQty,FPlanStartDate,FPlanFinishDate,FStatus"
+    legacy_tool: kingdee_query_production_orders
 
   PRD_PickMtrl:
     zh: 生产领料单
@@ -467,6 +526,11 @@ nouns:
     alias: [生产领料, 领料单, 领料]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FPickQty,FMoBillNo"
+    # ⚠️ legacy 工具 kingdee_query_production_pick_materials 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FMoBillNo,FMaterialId.FNumber,FMaterialId.FName,FPickQty,FStockId.FName"
+    legacy_tool: kingdee_query_production_pick_materials
 
   PRD_Instock:
     zh: 产品入库单
@@ -474,6 +538,11 @@ nouns:
     alias: [产品入库, 完工入库, 生产入库]
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FMaterialId.FName,FStockId.FName,FInQty,FMoBillNo"
+    # ⚠️ legacy 工具 kingdee_query_production_stock_in 的默认字段集与上面不同（审计 F-1）。
+    #    两者哪个正确需在真实账套验证；这里保留 FORM_CATALOG 的取值，
+    #    同时记下 legacy 取值，便于对照与切换。
+    legacy_fields: "FID,FBillNo,FDate,FDocumentStatus,FMoBillNo,FMaterialId.FNumber,FMaterialId.FName,FInQty,FStockId.FName"
+    legacy_tool: kingdee_query_production_stock_in
 
   ER_ExpenseRequest:
     zh: 费用申请单
@@ -489,6 +558,201 @@ nouns:
     allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
     default_fields: "FID,FBillNo,FDate,FDocumentStatus,FApplicantId.FName,FRequestDeptId.FName,FTotalReimAmount,FExpenseTypeId.FName"
 
+
+# ── 长尾名词（由 legacy 的 40 个专用查询工具收敛而来）──────────
+# 这些此前各自是一个独立的 MCP 工具，每个都要占一份 inputSchema。
+# 登记到这里之后，全部由 kd_query 一个工具承载：新增名词不增加 token。
+# default_fields 与 legacy 工具的默认字段集逐字一致，
+# 由 tests/test_query_parity.py 断言不漂移。
+  BD_MatTargetCost:
+    zh: 物料目标成本单
+    category: bill
+    alias: [物料目标成本, 目标成本单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FBillNo,FDate,FDocumentStatus,FMaterialId.FNumber,FMaterialId.FName,FTargetCost"
+    legacy_tool: kingdee_query_material_target_cost
+
+  BD_MaterialCost:
+    zh: 物料成本库
+    category: view
+    alias: [物料成本, 成本库, 物料成本库]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FStdCost,FLatestCost,FAvgCost"
+    legacy_tool: kingdee_query_material_cost
+
+  BOS_AuditLog:
+    zh: 审计日志
+    category: view
+    alias: [审计日志, 审核日志]
+    allowed_verbs: [query]
+    default_fields: "FID,FCREATEDATE,FCREATORID,FOBJECTID,FFORMID,FOBJECTNO,FAUDITRESULT,FMEMO"
+    legacy_tool: kingdee_query_audit_log
+
+  BOS_ModifyLog:
+    zh: 变更记录
+    category: view
+    alias: [变更记录, 修改记录, 变更日志]
+    allowed_verbs: [query]
+    default_fields: "FID,FCREATEDATE,FCREATORID,FOBJECTID,FFORMID,FOBJECTNO,FFIELDNAME,FOLDVALUE,FNEWVALUE"
+    legacy_tool: kingdee_query_change_log
+
+  BOS_OperateLog:
+    zh: 操作日志
+    category: view
+    alias: [操作日志]
+    allowed_verbs: [query]
+    default_fields: "FID,FDATETIME,FUSERID,FCOMPUTERNAME,FCLIENTIP,FENVIRONMENT,FOPERATENAME,FDESCRIPTION,FInterId,FTimeConsuming,FClientType"
+    legacy_tool: kingdee_query_operation_logs
+
+  CB_CostCalBill:
+    zh: 成本计算单
+    category: bill
+    alias: [成本计算单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FYear,FPeriod,FMaterialId.FNumber,FMaterialId.FName,FCostAmt,FMaterialCost,FLabourCost"
+    legacy_tool: kingdee_query_cost_calculation
+
+  CB_CostCenter:
+    zh: 成本中心
+    category: master_data
+    alias: [成本中心]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FNumber,FName,FDeptId.FName,FIsActive"
+    legacy_tool: kingdee_query_cost_centers
+
+  CB_CostItem:
+    zh: 成本项目
+    category: master_data
+    alias: [成本项目]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FNumber,FName,FCostItemType,FIsActive"
+    legacy_tool: kingdee_query_cost_items
+
+  CB_FinishInCostQuery:
+    zh: 完工入库成本
+    category: view
+    alias: [完工入库成本, 完工成本]
+    allowed_verbs: [query]
+    default_fields: "FMoBillNo,FMaterialId.FNumber,FMaterialId.FName,FFinishQty,FCostPrice,FCostAmt"
+    legacy_tool: kingdee_query_finished_product_cost
+
+  CB_MaterialCostQuery:
+    zh: 材料耗用成本
+    category: view
+    alias: [材料耗用成本, 耗用成本]
+    allowed_verbs: [query]
+    default_fields: "FMoBillNo,FMaterialId.FNumber,FMaterialId.FName,FConsumeQty,FCostPrice,FCostAmt"
+    legacy_tool: kingdee_query_material_cost_usage
+
+  FA_DepreciationBill:
+    zh: 资产折旧记录
+    category: view
+    alias: [折旧记录, 资产折旧]
+    allowed_verbs: [query]
+    default_fields: "FID,FYear,FPeriod,FAssetId.FNumber,FAssetId.FName,FDepreciateDeptId.FName,FDepreciateAmount,FOriginalAmount,FTotalDepreciate,FNetAmount"
+    legacy_tool: kingdee_query_asset_depreciation
+
+  FA_FAGet:
+    zh: 资产卡片
+    category: master_data
+    alias: [资产卡片, 固定资产卡片]
+    allowed_verbs: [query, read, save, forbid, enable]
+    default_fields: "FID,FNumber,FName,FAssetSource,FSpecification,FUsedPeriod,FOriginalAmount,FDepreciateRate,FUseDeptId.FName,FDocumentStatus,FStatus"
+    legacy_tool: kingdee_query_fixed_asset
+    # ⚠️ 同一 form_id 有两个 legacy 工具，且默认字段集互不相同（审计 F-1 的一个变体）：
+    #    kingdee_query_fixed_asset → 上面这一套（本注册表采用）
+    #    kingdee_query_asset_card  → 下面这一套
+    #    两者都自称"资产卡片查询"。哪一套正确需在真实账套验证。
+    legacy_fields_alt: "FID,FNumber,FName,FAssetSource,FOriginalAmount,FTotalDepreciate,FNetAmount,FDepreciateMonth,FUsefulLife,FSalvageValue,FCustodian.FName"
+    legacy_tool_alt: kingdee_query_asset_card
+
+  FA_Scrape:
+    zh: 资产报废单
+    category: bill
+    alias: [资产报废单, 报废单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FScrapeDate,FDocumentStatus,FAssetId.FNumber,FAssetId.FName,FOriginalAmount,FTotalDepreciate,FNetAmount,FScrapeType,FHandleMethod"
+    legacy_tool: kingdee_query_asset_scrape
+
+  FA_Transfer:
+    zh: 资产调拨单
+    category: bill
+    alias: [资产调拨单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FID,FBillNo,FTransferDate,FDocumentStatus,FAssetId.FNumber,FAssetId.FName,FOldDeptId.FName,FNewDeptId.FName,FTransferReason"
+    legacy_tool: kingdee_query_asset_transfer
+
+  PLAN_MRPResult:
+    zh: MRP运算结果
+    category: view
+    alias: [MRP运算结果, MRP结果]
+    allowed_verbs: [query]
+    default_fields: "FDetailId,FPlanQty,FBillNo,FMaterialId,FUnitId,FPlanDate,FMoBillNo,FPOBillNo,FPRBillNo,FSourceBillType,FSrcBillNo,FSupplyOrgId,FRequireOrgId,FSupplyDate,FDocumentStatus"
+    legacy_tool: kingdee_query_mrp_result
+
+  PLAN_ProductionPlan:
+    zh: 生产计划单
+    category: view
+    alias: [生产计划单, 生产计划]
+    allowed_verbs: [query]
+    default_fields: "FBillNo,FMaterialId,FMaterialName,FPlanQty,FPlanStartDate,FPlanEndDate,FStatus,FWorkShopId,FDocumentStatus"
+    legacy_tool: kingdee_query_production_plan
+
+  PRD_MOReport:
+    zh: 生产汇报单
+    category: bill
+    alias: [生产汇报单, 汇报单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FBillNo,FMOId,FMOBillNo,FMaterialId,FMaterialName,FReportQty,FUnitId,FFinishedQty,FScrapQty,FHourQty,FWorkStationId,FWorkGroupId,FProcessId,FDocumentStatus,FCreateDate"
+    legacy_tool: kingdee_query_production_report
+
+  STD_ProductCostQuery:
+    zh: 产品标准成本
+    category: view
+    alias: [产品标准成本, 标准成本]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FStdCost,FMaterialCost,FLabourCost,FFeeCost"
+    legacy_tool: kingdee_query_product_standard_cost
+
+  STK_CostAdjust:
+    zh: 成本调整单
+    category: bill
+    alias: [成本调整单]
+    allowed_verbs: [query, read, save, submit, audit, unaudit, delete, cancel, void, close, unclose, push]
+    default_fields: "FBillNo,FDate,FDocumentStatus,FCostOrgId.FNumber,FCostOrgId.FName,FAdjustType,FAdjustAmount"
+    legacy_tool: kingdee_query_cost_adjustments
+
+  STK_CostTrend:
+    zh: 成本价趋势分析
+    category: view
+    alias: [成本价趋势, 成本趋势]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FDate,FCostPrice,FPriceChange"
+    legacy_tool: kingdee_query_cost_trend
+
+  STK_InstantCostCompare:
+    zh: 即时成本对比分析
+    category: view
+    alias: [即时成本对比]
+    allowed_verbs: [query]
+    default_fields: "FMaterialId.FNumber,FMaterialId.FName,FStockId.FName,FInstantCost,FCostPrice,FDiffAmt"
+    legacy_tool: kingdee_query_instant_cost_compare
+
+  STK_MiscMovementDetail:
+    zh: 杂项出入库明细表
+    category: view
+    alias: [杂项出入库明细]
+    allowed_verbs: [query]
+    default_fields: "FID,FBillNo,FBillDate,FDocumentStatus,FStockOrgId.FName,FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FQty,FPrice,FAmount"
+    legacy_tool: kingdee_query_misc_movement_detail
+
+  STK_TransferPendingDetail:
+    zh: 分步式调出未调入明细
+    category: view
+    alias: [调出未调入明细, 分步调拨明细]
+    allowed_verbs: [query]
+    default_fields: "FID,FBillNo,FOutDate,FInDate,FDocumentStatus,FStockOrgId.FName,FOutStockId.FName,FInStockId.FName,FMaterialId.FNumber,FMaterialId.FName,FUnitId.FName,FOutQty,FInQty,FPendingQty"
+    legacy_tool: kingdee_query_transfer_pending_detail
 
 # ── 状态：唯一权威词表（审计 S-1 / S-2 的对症设计）──────────────
 # 此前 DOC_LIFECYCLE 用中文名、SQL 过滤用字母码，两套互不映射；

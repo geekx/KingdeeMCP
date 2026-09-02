@@ -390,6 +390,43 @@ $ python3 tools/ontology/operation_audit.py docs/ontology/samples/operation_audi
 
 ---
 
+## 7.5 F-1【中】默认字段集有两套互不一致的事实来源
+
+长尾查询收敛到底座时发现的新问题：「某个单据默认返回哪些字段」在代码里有两处定义，
+**37 个 form_id 中有 14 个两边不一致**。
+
+| 来源 | 位置 |
+|---|---|
+| `FORM_CATALOG[fid]["fields"]` | `server.py:1068` 起，注册表由此生成 |
+| 各查询工具自带的默认值 | 函数体内的 `IfExp` 兜底，或 Input 模型的 `field_keys` 默认值 |
+
+部分分歧看起来是实质性的，不只是多几个字段：
+
+| form_id | `FORM_CATALOG` | 查询工具 |
+|---|---|---|
+| `SAL_Quotation` | `FCustId.FName` | `FCUSTID.FName` |
+| `STK_TransferApply` | `FSendStockId` / `FReceiveStockId` | `FOutStockId` / `FInStockId` |
+| `STK_Inventory` | `FUnitId.FName` | `FBaseUnitId.FName` |
+
+`SAL_Quotation` 这条尤其可疑：`BILL_TEMPLATES` 里用的是全大写 `FCUSTID`，
+且模板注释明确写着「客户字段为全大写 FCUSTID」——**看起来 `FORM_CATALOG` 是错的**。
+但字段名对错只能在真实账套验证，静态分析下不下结论。
+
+还有一个变体：`FA_FAGet` 有**两个** legacy 查询工具
+（`kingdee_query_fixed_asset` 与 `kingdee_query_asset_card`），
+二者都自称"资产卡片查询"，默认字段集却完全不同。
+
+**处置**：注册表保留 `FORM_CATALOG` 的取值，同时把 legacy 取值记为 `legacy_fields`
+供对照与切换；`tests/test_query_parity.py` 锁定这 14 处已知分歧，
+**只许减少不许增加**——修好一处就要从 `KNOWN_DIVERGENT` 里移除，
+否则这层保护会随时间失效。
+
+> ⚠️ 这条发现的第一版判定是错的：最初的抽取只读函数体，
+> 把写在 Pydantic 模型里的默认值误报成"不一致"，一度报出错误的清单。
+> 补全两处来源后才得到可信结果。方法上的教训记在 [`04-audit-trail.md`](04-audit-trail.md)。
+
+---
+
 ## 8. 建议的处置顺序
 
 | 顺序 | 动作 | 对应发现 | 理由 |
