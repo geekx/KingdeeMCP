@@ -372,6 +372,79 @@ DOC_LIFECYCLE: dict[str, dict] = {
     "unaudit": {"from": "已审核", "to": "待审核", "success": True,  "next_action": None,      "next_action_desc": "已反审核，可修改后重新提交"},
     "delete":  {"from": "草稿",   "to": "已删除", "success": True,  "next_action": None,      "next_action_desc": "单据已删除"},
     "push":    {"from": "源单",   "to": "目标单草稿", "success": True, "next_action": "submit+audit", "next_action_desc": "目标单已生成，请依次调用 kingdee_submit_bills + kingdee_audit_bills"},
+    # ── ExecuteOperation / CancelAssign 系动词（审计 S-3 / AT-04）──────────
+    # 此前这 6 个动词在 DOC_LIFECYCLE 中完全缺席，_result_status() 取到空 lifecycle，
+    # next_action 一律返回 None —— 按本函数的约定那表示「流程已完成」。
+    # 于是"作废一张单"和"审核完一张单"会给调用方同样的完成信号，
+    # 掩盖了作废/关闭/禁用之后的真实状态。
+    "cancel":  {"from": "审批中",   "to": "创建",     "success": True, "next_action": "submit",
+                "next_action_desc": "已撤销回可编辑状态，修改后需重新提交"},
+    # kingdee_cancel_bills 传给 _result_status 的 op 标签是 "cancel_assign"，
+    # 两个键都登记，避免因标签写法不同而重新落回"无状态定义"。
+    "cancel_assign": {"from": "审批中", "to": "创建",  "success": True, "next_action": "submit",
+                      "next_action_desc": "已撤销回可编辑状态，修改后需重新提交"},
+    "void":    {"from": "已审核",   "to": "已作废",   "success": True, "next_action": None,
+                "next_action_desc": "单据已作废，不可恢复"},
+    "close":   {"from": "已审核",   "to": "已关闭",   "success": True, "next_action": None,
+                "next_action_desc": "整单已关闭，不能再下推；如需恢复调用 kingdee_unclose_bill"},
+    "unclose": {"from": "已关闭",   "to": "已审核",   "success": True, "next_action": None,
+                "next_action_desc": "已反关闭，恢复为已审核，可继续下推"},
+    "forbid":  {"from": "已启用",   "to": "已禁用",   "success": True, "next_action": None,
+                "next_action_desc": "基础资料已禁用，新单据不能再引用"},
+    "enable":  {"from": "已禁用",   "to": "已启用",   "success": True, "next_action": None,
+                "next_action_desc": "基础资料已启用"},
+}
+
+# ─────────────────────────────────────────────
+# 动词契约（审计 A-2）
+#
+# MCP 协议只有 readOnly/destructive/idempotent/openWorld 四个提示，**缺 arity 与
+# atomicity**。于是 kingdee_audit_bills（逐条、可能部分成功）和 kingdee_void_bills
+# （Ids 逗号拼接、原子性由服务端决定、返回体无 per-id 结果）在类型系统里长得
+# 一模一样，调用方无从判断失败后能不能重试、要不要补偿。
+# 这里把契约补上，并随每次批量操作的结果一起返回。
+# ─────────────────────────────────────────────
+VERB_CONTRACT: dict[str, dict] = {
+    #                arity      atomicity          idempotent  inverse
+    "save":    {"arity": "single", "atomicity": "atomic",         "idempotent": False, "inverse": "delete"},
+    "submit":  {"arity": "batch",  "atomicity": "per_item",       "idempotent": False, "inverse": "cancel"},
+    "audit":   {"arity": "batch",  "atomicity": "per_item",       "idempotent": False, "inverse": "unaudit"},
+    "unaudit": {"arity": "batch",  "atomicity": "per_item",       "idempotent": False, "inverse": "audit"},
+    "delete":  {"arity": "batch",  "atomicity": "per_item",       "idempotent": False, "inverse": None},
+    "cancel_assign": {"arity": "batch", "atomicity": "server_defined", "idempotent": False, "inverse": "submit"},
+    "void":    {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": None},
+    "close":   {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": "unclose"},
+    "unclose": {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": "close"},
+    "forbid":  {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": "enable"},
+    "enable":  {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": "forbid"},
+    "push":    {"arity": "batch",  "atomicity": "server_defined", "idempotent": False, "inverse": None},
+}
+
+_ATOMICITY_TIP = {
+    "per_item": ("逐条执行：已成功的部分**不会回滚**。重试时请只针对 failed_details "
+                 "中的目标，不要整批重发。"),
+    "server_defined": ("由服务端决定原子性，返回体不含 per-id 结果 —— 失败时**无法判定"
+                       "批量中哪些已生效**。请用 kingdee_view_bill 逐个查证后再重试。"),
+    "atomic": "全成功或全失败，失败后系统状态未变，可修正后直接重试。",
+}
+
+
+def _contract(verb: str) -> dict:
+    """返回动词契约。inverse 为 None 即无逆动词 = 破坏性操作。"""
+    c = dict(VERB_CONTRACT.get(verb, {"arity": "batch", "atomicity": "server_defined",
+                                      "idempotent": False, "inverse": None}))
+    c["destructive"] = c.get("inverse") is None
+    c["atomicity_note"] = _ATOMICITY_TIP.get(c["atomicity"], "")
+    return c
+
+
+# 状态名与 base/registry.yml:states 的规范码对照（审计 S-1）。
+# 这里保留中文名是为了不破坏既有返回体；规范码是唯一权威，新代码请用底座。
+STATE_CODE_OF_NAME: dict[str, str] = {
+    "草稿": "A:创建", "暂存": "Z:暂存", "创建": "A:创建",
+    "待审核": "B:审核中", "审批中": "B:审核中", "已审核": "C:已审核",
+    "已删除": "DELETED", "已作废": "VOID", "已关闭": "CLOSED",
+    "已启用": "ENABLED", "已禁用": "FORBIDDEN",
 }
 
 def _match_known_pattern(message: str) -> Optional[dict]:
@@ -2865,6 +2938,39 @@ async def kingdee_query_partners(params: PartnerQueryInput) -> str:
         return _err(e)
 
 
+async def _prepare_save_model(form_id: str, raw_model: dict) -> tuple[dict, list]:
+    """Save 前的模型预处理：字段名自动纠错 + 字段顺序防御。
+
+    审计 A-6：这两段此前只写在 kingdee_save_bill 里，
+    kingdee_create_and_audit / kingdee_create_lx_billing 的 Save 步骤都没有 ——
+    同一个「保存」动词走两条路径行为不同，一站式工具在本环境下反而更容易
+    触发"含税单价不能小于等于0"。抽成共用函数，两边行为一致。
+
+    Returns:
+        (处理后的 model, 自动修正记录列表)
+    """
+    model = dict(raw_model)
+    # 新建时 FID 设为 0，修改时保留原 FID
+    model.setdefault("FID", 0)
+
+    # 尝试自动修正字段名（基于元数据）
+    auto_fixes: list = []
+    validator = await _get_metadata_validator(form_id)
+    if validator:
+        model, auto_fixes = validator.validate_and_fix(model)
+
+    # ⚠️ 本环境金蝶 Save 对字段顺序敏感：财务信息(含 FIN，如 FQUOTATIONFIN)
+    # 必须排在分录(含 ENTRY，如 FQUOTATIONENTRY)之前，否则分录单价被判定为 0
+    # 而报"含税单价不能小于等于0"。做防御性排序：所有非 ENTRY 键（含 FIN/表头）
+    # 统一置于 ENTRY 键之前，保持表头→FIN→ENTRY 的已知可用顺序。
+    _keys = list(model.keys())
+    _entry_keys = [k for k in _keys if "ENTRY" in k.upper()]
+    _non_entry = [k for k in _keys if k not in _entry_keys]
+    if _entry_keys and len(_non_entry) != len(_keys):
+        model = {k: model[k] for k in _non_entry + _entry_keys}
+    return model, auto_fixes
+
+
 @mcp.tool(
     name="kingdee_save_bill",
     annotations={"title": "新建或修改单据", "readOnlyHint": False, "destructiveHint": False,
@@ -2891,28 +2997,7 @@ async def kingdee_save_bill(params: SaveInput) -> str:
         str: JSON，含新建单据的 FID 和单据编号 FBillNo
     """
     try:
-        # 构建 Kingdee Save API 格式：
-        # data 内部 Model（单据字段）和 NeedUpDateFields 等是同级兄弟节点
-        model = dict(params.model)
-        # 新建时 FID 设为 0，修改时保留原 FID
-        model.setdefault("FID", 0)
-
-        # 尝试自动修正字段名（基于元数据）
-        auto_fixes = []
-        validator = await _get_metadata_validator(params.form_id)
-        if validator:
-            model, auto_fixes = validator.validate_and_fix(model)
-
-        # ⚠️ 本环境金蝶 Save 对字段顺序敏感：财务信息(含 FIN，如 FQUOTATIONFIN)
-        # 必须排在分录(含 ENTRY，如 FQUOTATIONENTRY)之前，否则分录单价被判定为 0
-        # 而报“含税单价不能小于等于0”。做防御性排序：所有非 ENTRY 键（含 FIN/表头）
-        # 统一置于 ENTRY 键之前，保持表头→FIN→ENTRY 的已知可用顺序。
-        _keys = list(model.keys())
-        _entry_keys = [k for k in _keys if "ENTRY" in k.upper()]
-        _non_entry = [k for k in _keys if k not in _entry_keys]
-        if _entry_keys and len(_non_entry) != len(_keys):
-            model = {k: model[k] for k in _non_entry + _entry_keys}
-
+        model, auto_fixes = await _prepare_save_model(params.form_id, params.model)
         result = await _post_raw(
             "save",
             params.form_id,
@@ -3102,8 +3187,11 @@ async def kingdee_get_bill_template(form_id: str) -> str:
 
 @mcp.tool(
     name="kingdee_refresh_metadata",
-    annotations={"title": "刷新表单元数据缓存", "readOnlyHint": True, "destructiveHint": False,
-                 "idempotentHint": False, "openWorldHint": False}
+    # 审计 N-2：原标注 readOnly=True + idempotent=False 自相矛盾。
+    # 它确实会写进程内 _METADATA_CACHE 与磁盘缓存（对金蝶只读，对本服务不是），
+    # 故 readOnly=False；而重复刷新得到同样结果，是幂等的。
+    annotations={"title": "刷新表单元数据缓存", "readOnlyHint": False, "destructiveHint": False,
+                 "idempotentHint": True, "openWorldHint": False}
 )
 async def kingdee_refresh_metadata(form_id: str) -> str:
     """强制重新从金蝶拉取指定表单的元数据（忽略内存/磁盘缓存），用于表单结构变更后刷新。
@@ -3153,6 +3241,7 @@ async def kingdee_submit_bills(params: BillIdsInput) -> str:
                 failed.append({"id": bill_id, "error": f"{type(ex).__name__}: {ex}"[:300]})
         return _fmt({
             "op": "submit", "success": len(failed) == 0,
+            "contract": _contract("submit"),
             "total": len(params.bill_ids),
             "succeeded_count": len(succeeded), "failed_count": len(failed),
             "succeeded_ids": succeeded, "failed_details": failed,
@@ -3190,6 +3279,7 @@ async def kingdee_audit_bills(params: BillIdsInput) -> str:
                 failed.append({"id": bill_id, "error": f"{type(ex).__name__}: {ex}"[:300]})
         return _fmt({
             "op": "audit", "success": len(failed) == 0,
+            "contract": _contract("audit"),
             "total": len(params.bill_ids),
             "succeeded_count": len(succeeded), "failed_count": len(failed),
             "succeeded_ids": succeeded, "failed_details": failed,
@@ -3226,6 +3316,7 @@ async def kingdee_unaudit_bills(params: BillIdsInput) -> str:
                 failed.append({"id": bill_id, "error": f"{type(ex).__name__}: {ex}"[:300]})
         return _fmt({
             "op": "unaudit", "success": len(failed) == 0,
+            "contract": _contract("unaudit"),
             "total": len(params.bill_ids),
             "succeeded_count": len(succeeded), "failed_count": len(failed),
             "succeeded_ids": succeeded, "failed_details": failed,
@@ -3262,6 +3353,7 @@ async def kingdee_delete_bills(params: BillIdsInput) -> str:
                 failed.append({"id": bill_id, "error": f"{type(ex).__name__}: {ex}"[:300]})
         return _fmt({
             "op": "delete", "success": len(failed) == 0,
+            "contract": _contract("delete"),
             "total": len(params.bill_ids),
             "succeeded_count": len(succeeded), "failed_count": len(failed),
             "succeeded_ids": succeeded, "failed_details": failed,
@@ -3416,8 +3508,13 @@ async def _run_execute_action(params: ExecuteActionInput, action: str,
             result = await _post_raw("execute", params.form_id, business, op_number=action)
 
         status_data = _result_status(result, op_label)
+        status_data["contract"] = _contract(op_label)
         status_data["form_id"] = params.form_id
         status_data["action"] = action
+        if len(params.bill_ids or []) > 1:
+            status_data["batch_note"] = (
+                f"本次一次性提交了 {len(params.bill_ids)} 个 Ids。"
+                + _contract(op_label)["atomicity_note"])
         status_data["action_source"] = source
         status_data["endpoint"] = endpoint
         if matched_name:
@@ -3730,6 +3827,97 @@ class PushAndAuditInput(BaseModel):
     )
 
 
+# ─────────────────────────────────────────────
+# 复合工具的中间态处理（审计 A-1）
+#
+# 复合工具一次调用内顺序执行 3~4 个写端点，中途失败时前序副作用已落库且不回滚。
+# 原实现只返回一段自然语言 recovery_hint，把补偿责任交给调用方的自觉。
+#
+# 这里**不做自动补偿**——自动删除用户单据风险更高，且"删草稿"在不同状态下
+# 步骤不同。改为两件事：
+#   1. 返回结构化的 pending_compensation：明确列出遗留对象与建议的补偿动作序列；
+#   2. 写一条过程操作审计记录，使 kd_audit(scope="dangling") /
+#      wikiskill 每日回溯能把它当作"未清算的中间态"查出来，而不是石沉大海。
+# ─────────────────────────────────────────────
+
+_COMPENSATION_PLAN: dict[str, list[str]] = {
+    # halted_at -> 建议的补偿动作序列（对已生成的对象执行）
+    "save":   [],                                    # 未生成任何东西
+    "submit": ["kingdee_delete_bills"],              # 草稿，直接删
+    "audit":  ["kingdee_delete_bills"],              # 已提交未审核，仍可删
+    "push":   ["kingdee_delete_bills"],              # 目标单草稿
+}
+
+
+def _record_halt(out: dict, form_id: str, produced: list[str] | None = None) -> dict:
+    """给中途失败的复合操作补上结构化待补偿事项，并落一条过程审计记录。"""
+    halted = out.get("halted_at")
+    if not halted:
+        return out
+    objects = list(produced or [])
+    for key in ("fid", "bill_no"):
+        if out.get(key):
+            objects.append(str(out[key]))
+    for key in ("target_bill_nos", "target_fids"):
+        objects.extend(str(x) for x in (out.get(key) or []))
+    objects = sorted(set(objects))
+
+    if objects:
+        plan = _COMPENSATION_PLAN.get(halted, ["kingdee_unaudit_bills", "kingdee_delete_bills"])
+        out["pending_compensation"] = {
+            "form_id": form_id,
+            "left_objects": objects,
+            "suggested_actions": plan,
+            "note": ("这些对象已经落库且**不会自动回滚**。要么续做完成生命周期，"
+                     "要么按 suggested_actions 清理。"
+                     "在清理前它们会一直占用单据号/源单关联数量。"),
+        }
+    else:
+        out["pending_compensation"] = {
+            "form_id": form_id, "left_objects": [],
+            "suggested_actions": [],
+            "note": "未生成任何对象，无需补偿。",
+        }
+
+    # 落过程审计，让中间态可被 dangling_traces() 查出（审计 P-1/P-5）。
+    #
+    # ⚠️ 必须把**成功的前序步骤也记下来**，不能只记失败那一步：
+    #    "遗留了什么"恰恰来自成功的 Save/Push，而悬挂链的定义是
+    #    "有写操作已生效、但整条链没走到终态" —— 只记失败步会让它判不出来。
+    #    所有步骤共享同一 trace_id，事后才能拼回一次完整的业务操作。
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "tools" / "ontology"))
+        from operation_audit import audit_recorder
+
+        _STATE_AFTER = {"save": "Z:暂存", "push": "Z:暂存",
+                        "submit": "B:审核中", "audit": "C:已审核"}
+        with audit_recorder.operation(out.get("op", "composite"), actor=USERNAME) as _op:
+            for st in (out.get("steps") or []):
+                op_name = st.get("op", "?")
+                ok = bool(st.get("success"))
+                _op.step(
+                    verb=op_name.capitalize(), noun=form_id, endpoint=op_name,
+                    object_id=str(st.get("fid")) if st.get("fid") else None,
+                    object_no=st.get("bill_no") or (
+                        (out.get("target_bill_nos") or [None])[0] if op_name == "push" else None),
+                    state_to=_STATE_AFTER.get(op_name) if ok else None,
+                    outcome="success" if ok else (
+                        "unknown" if st.get("exception") else "failed"),
+                    error=({"message": str(st.get("errors") or st.get("exception"))[:300]}
+                           if not ok else None),
+                )
+            if not out.get("steps"):
+                # 首步就抛异常，连 steps 都没来得及记
+                _op.step(verb=str(halted).capitalize(), noun=form_id, endpoint=str(halted),
+                         outcome="unknown", state_to=None,
+                         error={"message": str(out.get("errors") or out.get("error") or "")[:300]})
+    except Exception:
+        pass  # 审计落盘失败不应连累主流程；kd_audit 会显示记录缺口
+    return out
+
+
 def _step_failed_status(result: Any, op: str) -> dict:
     """run a _post_raw 已返回 result 后，检查是否业务失败，构造步骤记录。"""
     return _result_status(result, op)
@@ -3758,8 +3946,9 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
 
     # Step 1: Save
     try:
-        model = dict(params.model)
-        model.setdefault("FID", 0)
+        # 审计 A-6：与 kingdee_save_bill 走同一套预处理（字段自愈 + 顺序防御），
+        # 否则同一个"保存"动词在两条路径上行为不同。
+        model, _auto_fixes = await _prepare_save_model(params.form_id, params.model)
         save_result = await _post_raw(
             "save",
             params.form_id,
@@ -3772,6 +3961,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
         steps.append({"op": "save", "success": False, "exception": f"{type(e).__name__}: {e}"})
         out["halted_at"] = "save"
         out["recovery_hint"] = "Save 抛异常未生成草稿，无需清理。修正 model 后重试 kingdee_create_and_audit 或调用 kingdee_save_bill。"
+        _record_halt(out, params.form_id)
         return _err(e, extra_errors=[{"step": "save", "stage_summary": out}], op="create_and_audit")
 
     save_status = _result_status(save_result, "save")
@@ -3796,7 +3986,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.form_id))
     steps.append(step_save)
 
     # Step 2: Submit
@@ -3810,6 +4000,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             f"可手动调用 kingdee_submit_bills(form_id=\"{params.form_id}\", bill_ids=[\"{fid}\"]) 重试，"
             f"或先 kingdee_delete_bills 清理草稿。"
         )
+        _record_halt(out, params.form_id)
         return _err(e, extra_errors=[{"step": "submit", "stage_summary": out}], op="create_and_audit")
 
     submit_status = _result_status(submit_result, "submit")
@@ -3828,7 +4019,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.form_id))
     steps.append(step_submit)
 
     # Step 3: Audit
@@ -3841,6 +4032,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             f"已 Save+Submit (fid={fid})。Audit 抛异常。"
             f"可手动调用 kingdee_audit_bills(form_id=\"{params.form_id}\", bill_ids=[\"{fid}\"]) 重试。"
         )
+        _record_halt(out, params.form_id)
         return _err(e, extra_errors=[{"step": "audit", "stage_summary": out}], op="create_and_audit")
 
     audit_status = _result_status(audit_result, "audit")
@@ -3859,13 +4051,13 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.form_id))
     steps.append(step_audit)
 
     out["success"] = True
     out["next_action"] = None
     out["tip"] = "工作流完成，单据已审核生效。如需修改，请先 kingdee_unaudit_bills 反审核。"
-    return _fmt(out)
+    return _fmt(_record_halt(out, params.form_id))
 
 
 @mcp.tool(
@@ -3887,6 +4079,12 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
     steps: list[dict] = []
     out: dict[str, Any] = {
         "op": "push_and_audit", "success": False, "halted_at": None, "steps": steps,
+        # 复合动词的契约取其最弱的一环：push 由服务端决定原子性、无逆动词，
+        # 内部的 submit/audit 又是逐条执行 —— 整体既非原子也不可回滚。
+        "contract": {"arity": "batch", "atomicity": "none", "idempotent": False,
+                     "inverse": None, "destructive": True,
+                     "atomicity_note": ("复合操作：中途失败时前序步骤的副作用已落库且"
+                                        "不会回滚，见 halted_at 与 pending_compensation。")},
         "source_bill_nos": params.source_bill_nos, "target_form_id": params.target_form_id,
     }
 
@@ -3908,6 +4106,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
         steps.append({"op": "push", "success": False, "exception": f"{type(e).__name__}: {e}"})
         out["halted_at"] = "push"
         out["recovery_hint"] = "Push 抛异常，未生成目标单。检查源单状态/转换规则/连通性后重试。"
+        _record_halt(out, params.target_form_id)
         return _err(e, extra_errors=[{"step": "push", "stage_summary": out}], op="push_and_audit")
 
     push_status = _result_status(push_result, "push")
@@ -3937,7 +4136,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.target_form_id))
     steps.append(step_push)
 
     # 不需要后续 submit+audit
@@ -3948,13 +4147,13 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             "请按需手动 kingdee_submit_bills + kingdee_audit_bills。"
         )
         out["next_action"] = "submit+audit"
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.target_form_id))
 
     if not target_fids:
         out["halted_at"] = "submit"
         out["recovery_hint"] = "Push 成功但未返回目标 FID，无法自动 Submit。请用 target_bill_nos 反查 FID。"
         out["errors"] = [{"message": "Push response missing Ids"}]
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.target_form_id))
 
     # Step 2: Submit（逐条，因金蝶 API 每次只接受单个 Ids）
     submit_succeeded, submit_failed = [], []
@@ -3982,7 +4181,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.target_form_id))
     steps.append(step_submit)
 
     # Step 3: Audit（逐条）
@@ -4013,7 +4212,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass
-        return _fmt(out)
+        return _fmt(_record_halt(out, params.target_form_id))
     steps.append(step_audit)
 
     out["success"] = True
@@ -4021,7 +4220,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
     out["tip"] = (
         f"工作流完成：已下推并审核 {len(target_fids)} 张目标单 ({params.target_form_id})。"
     )
-    return _fmt(out)
+    return _fmt(_record_halt(out, params.target_form_id))
 
 
 # ─────────────────────────────────────────────
@@ -4132,6 +4331,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
         steps.append({"op": "push", "success": False, "exception": f"{type(e).__name__}: {e}"})
         out["halted_at"] = "push"
         out["recovery_hint"] = "Push 抛异常，未生成目标单。检查源单状态/连通性后重试。"
+        _record_halt(out, target_form_id)
         return _err(e, extra_errors=[{"step": "push", "stage_summary": out}], op=op_name)
 
     push_status = _result_status(push_result, "push")
@@ -4169,7 +4369,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
         out["recovery_hint"] = (
             "Push 失败：检查源单是否已审核且未关闭；二开单据要求源单为已审核状态。"
         )
-        return _fmt(out)
+        return _fmt(_record_halt(out, target_form_id))
     steps.append(step_push)
 
     target_fid = target_fids[0]
@@ -4232,6 +4432,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"Push 已生成草稿 fid={target_fid}, billno={out.get('target_bill_no')}。"
             f"Save 抛异常，手动 view_bill 后用 save_bill 补字段。"
         )
+        _record_halt(out, target_form_id)
         return _err(e, extra_errors=[{"step": "save", "stage_summary": out}], op=op_name)
 
     save_status = _result_status(save_result, "save")
@@ -4245,7 +4446,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"Push 成功但 Save 字段补值失败 fid={target_fid}。"
             f"检查 errors[].suggestion；常见：物料编码不存在、金额格式错误。"
         )
-        return _fmt(out)
+        return _fmt(_record_halt(out, target_form_id))
     steps.append(step_save)
 
     if not params.auto_audit:
@@ -4255,7 +4456,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"已生成 {target_form_id} 草稿 fid={target_fid} ({out.get('target_bill_no')})，"
             f"业务字段已补值。auto_audit=False，请手动调用 kingdee_submit_bills + kingdee_audit_bills。"
         )
-        return _fmt(out)
+        return _fmt(_record_halt(out, target_form_id))
 
     # ── Step 3: Submit ──────────────────────────
     try:
@@ -4267,6 +4468,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"Push+Save 已成功 fid={target_fid}。Submit 异常，"
             f"手动 kingdee_submit_bills(form_id=\"{target_form_id}\", bill_ids=[\"{target_fid}\"]) 重试。"
         )
+        _record_halt(out, target_form_id)
         return _err(e, extra_errors=[{"step": "submit", "stage_summary": out}], op=op_name)
 
     submit_status = _result_status(submit_result, "submit")
@@ -4280,7 +4482,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"Submit 失败 fid={target_fid}。检查 errors[].suggestion；"
             f"常见：必填字段缺失、币别未配汇率。"
         )
-        return _fmt(out)
+        return _fmt(_record_halt(out, target_form_id))
     steps.append(step_submit)
 
     # ── Step 4: Audit ──────────────────────────
@@ -4293,6 +4495,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
             f"Submit 已成功 fid={target_fid}。Audit 异常，"
             f"手动 kingdee_audit_bills(form_id=\"{target_form_id}\", bill_ids=[\"{target_fid}\"]) 重试。"
         )
+        _record_halt(out, target_form_id)
         return _err(e, extra_errors=[{"step": "audit", "stage_summary": out}], op=op_name)
 
     audit_status = _result_status(audit_result, "audit")
@@ -4305,7 +4508,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
         out["recovery_hint"] = (
             f"Audit 失败 fid={target_fid}。常见：金额=0 / 工作流权限不足。"
         )
-        return _fmt(out)
+        return _fmt(_record_halt(out, target_form_id))
     steps.append(step_audit)
 
     out["success"] = True
@@ -4316,7 +4519,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
     if not is_receipt and params.so_no:
         closing += f"（关联销售订单 F_TRNV_SONo={params.so_no}，毛利闭环已建立）"
     out["tip"] = closing
-    return _fmt(out)
+    return _fmt(_record_halt(out, target_form_id))
 
 
 # ─────────────────────────────────────────────
@@ -4784,7 +4987,9 @@ class WorkflowActionInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     form_id: str = Field(..., description="单据类型，如 ER_ExpenseReimburse")
     bill_id: str = Field(..., description="单据内码 FID")
-    action: str = Field(..., description="操作：approve(通过)、reject(驳回)")
+    action: str = Field(default="approve",
+                        description="仅 kingdee_workflow_approve 使用，固定 approve。"
+                                    "驳回请改用 kingdee_workflow_reject（审计 R-7）")
     opinion: str = Field(default="", description="审批意见")
 
 
@@ -4913,39 +5118,103 @@ async def kingdee_query_workflow_status(params: WorkflowStatusInput) -> str:
         return _err(e)
 
 
+# ─────────────────────────────────────────────
+# 审批动作（审计 N-1 / R-6 / R-7）
+#
+# 原 kingdee_workflow_approve 用一个 action 参数派发到两个语义完全不同的动作：
+#   approve → audit（审核）
+#   reject  → unaudit（反审核）
+# 三个问题：
+#   N-1 一个工具名承载两个破坏性不同的动词，annotations 只能取其一，
+#       与 kingdee_unaudit_bills(destructiveHint=True) 自相矛盾；
+#   R-6 opinion（审批意见）被接收但**从不发给金蝶**，只在响应里回显 ——
+#       调用方以为已入库，实际静默丢失；
+#   R-7 reject 执行的是**反审核**，不是工作流驳回。二者作用对象不同
+#       （单据状态 vs 审批实例），且此路径绕过工作流引擎。
+# 现拆成两个工具，各自的破坏性可以如实标注；opinion 不再假装被记录。
+# ─────────────────────────────────────────────
+
+_OPINION_NOT_PERSISTED = (
+    "⚠️ 审批意见未写入金蝶。本工具走的是 Audit/Unaudit 接口，"
+    "它不接受审批意见字段；意见只在本次返回中回显，不会留在单据上。"
+    "需要留痕请在金蝶工作流中操作，或改用工作流审批接口。"
+)
+
+
 @mcp.tool(
     name="kingdee_workflow_approve",
-    annotations={"title": "审批通过", "readOnlyHint": False, "destructiveHint": False,
+    annotations={"title": "审核通过", "readOnlyHint": False, "destructiveHint": False,
                  "idempotentHint": False, "openWorldHint": False}
 )
 async def kingdee_workflow_approve(params: WorkflowActionInput) -> str:
-    """审批通过或驳回单据。
+    """审核通过单据（待审核 → 已审核）。等价于 kingdee_audit_bills 的单据版。
 
-    - approve: 审核通过（待审核 → 已审核）
-    - reject:  驳回（已审核 → 反审核回到待审核状态）
-    - 返回结构化结果，包含 success / next_action 字段
+    ⚠️ 驳回请改用 kingdee_workflow_reject —— 它执行的是反审核，
+    破坏性与本工具不同，不能共用一个入口（审计 N-1/R-7）。
+
+    ⚠️ opinion（审批意见）不会被写入金蝶，见返回中的 opinion_warning（审计 R-6）。
 
     Returns:
-        str: JSON，含 success / action / bill_id 字段
+        str: JSON，含 success / action / bill_id / opinion_persisted 字段
     """
+    if params.action and params.action != "approve":
+        return _fmt({
+            "success": False,
+            "error": f"kingdee_workflow_approve 只做审核通过，不接受 action={params.action!r}。",
+            "suggestion": ("驳回请调用 kingdee_workflow_reject。它执行反审核"
+                           "（已审核 → 待审核），破坏性更高，需要单独确认。"
+                           "注意：反审核不等于工作流驳回，也不会更新审批流实例。"),
+        })
     try:
-        if params.action == "approve":
-            result = await _post_raw("audit", params.form_id, {"Ids": params.bill_id})
-            action_name = "审批通过"
-        elif params.action == "reject":
-            result = await _post_raw("unaudit", params.form_id, {"Ids": params.bill_id})
-            action_name = "审批驳回"
-        else:
-            return _fmt({"error": f"不支持的操作: {params.action}"})
-
-        status_data = _result_status(result, "audit" if params.action == "approve" else "unaudit")
-        status_data["action"] = action_name
+        result = await _post_raw("audit", params.form_id, {"Ids": params.bill_id})
+        status_data = _result_status(result, "audit")
+        status_data["action"] = "审核通过"
         status_data["bill_id"] = params.bill_id
         if params.opinion:
             status_data["opinion"] = params.opinion
+            status_data["opinion_persisted"] = False
+            status_data["opinion_warning"] = _OPINION_NOT_PERSISTED
         return _fmt(status_data)
     except Exception as e:
-        return _err(e, op=params.action)
+        return _err(e, op="audit")
+
+
+@mcp.tool(
+    name="kingdee_workflow_reject",
+    annotations={"title": "反审核（非工作流驳回）", "readOnlyHint": False,
+                 "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
+)
+async def kingdee_workflow_reject(params: WorkflowActionInput) -> str:
+    """反审核单据（已审核 → 待审核），使单据回到可修改状态。
+
+    ⚠️ **这不是工作流驳回。** 反审核改的是单据状态（FDocumentStatus），
+    工作流驳回改的是审批流实例；本工具直接调 Unaudit 接口，
+    **绕过工作流引擎**，审批流实例不会被更新（审计 R-7）。
+    需要真正的驳回请在金蝶工作流中操作。
+
+    ⚠️ 反审核会使已生效的单据失效，可能影响已下推的下游单据。
+    与 kingdee_unaudit_bills 同为破坏性操作，执行前应取得明确确认。
+
+    ⚠️ opinion（审批意见）不会被写入金蝶，见返回中的 opinion_warning（审计 R-6）。
+
+    Returns:
+        str: JSON，含 success / action / bill_id / bypassed_workflow 字段
+    """
+    try:
+        result = await _post_raw("unaudit", params.form_id, {"Ids": params.bill_id})
+        status_data = _result_status(result, "unaudit")
+        status_data["action"] = "反审核"
+        status_data["bill_id"] = params.bill_id
+        status_data["bypassed_workflow"] = True
+        status_data["semantics_warning"] = (
+            "本操作是反审核（单据状态回退），不是工作流驳回；审批流实例未更新。")
+        if params.opinion:
+            status_data["opinion"] = params.opinion
+            status_data["opinion_persisted"] = False
+            status_data["opinion_warning"] = _OPINION_NOT_PERSISTED
+        return _fmt(status_data)
+    except Exception as e:
+        return _err(e, op="unaudit")
 
 
 @mcp.tool(
@@ -7026,7 +7295,10 @@ async def kingdee_submit_production_orders(params: ProductionOrderBillIdsInput) 
         result = await _post_raw("submit", "PRD_MO", {"Ids": params.bill_ids})
         status_data = _result_status(result, "submit")
         if status_data.get("success"):
-            status_data["next_action"] = "kingdee_audit_production_orders"
+            # next_action 是**动词**不是工具名：harness RULE-001 据此反推后继动作。
+            # 塞工具名会让规则解析失败并恒定误报（审计 R-2）。
+            status_data["next_action"] = "audit"
+            status_data["next_action_desc"] = "建议调用 kingdee_audit_production_orders 审核"
         return _fmt(status_data)
     except Exception as e:
         return _err(e, op="submit")
@@ -7078,7 +7350,9 @@ async def kingdee_push_production_pick(params: ProductionPickPushInput) -> str:
         result = await _post_raw("push", "PRD_MO", push_data)
         status_data = _result_status(result, "push")
         if status_data.get("success"):
-            status_data["next_action"] = "kingdee_submit_bills + kingdee_audit_bills"
+            status_data["next_action"] = "submit+audit"
+            status_data["next_action_desc"] = (
+                "建议依次调用 kingdee_submit_bills + kingdee_audit_bills")
             status_data["tip"] = "领料单审核时扣减即时库存"
         return _fmt(status_data)
     except Exception as e:
@@ -7113,7 +7387,9 @@ async def kingdee_push_production_stock_in(params: ProductionStockInPushInput) -
         result = await _post_raw("push", "PRD_PickMtrl", push_data)
         status_data = _result_status(result, "push")
         if status_data.get("success"):
-            status_data["next_action"] = "kingdee_submit_bills + kingdee_audit_bills"
+            status_data["next_action"] = "submit+audit"
+            status_data["next_action_desc"] = (
+                "建议依次调用 kingdee_submit_bills + kingdee_audit_bills")
             status_data["tip"] = "入库单审核时增加即时库存"
         return _fmt(status_data)
     except Exception as e:
@@ -7134,7 +7410,7 @@ class MRPResultQueryInput(BaseModel):
 @mcp.tool(
     name="kingdee_query_mrp_result",
     annotations={"title": "MRP运算结果查询", "readOnlyHint": True, "destructiveHint": False,
-                 "idempotentHint": False, "openWorldHint": False}
+                 "idempotentHint": True, "openWorldHint": False}
 )
 async def kingdee_query_mrp_result(params: MRPResultQueryInput) -> str:
     """查询 MRP 运算结果（PLAN_MRPResult）。
@@ -7163,7 +7439,7 @@ class ProductionPlanQueryInput(BaseModel):
 @mcp.tool(
     name="kingdee_query_production_plan",
     annotations={"title": "生产计划单查询", "readOnlyHint": True, "destructiveHint": False,
-                 "idempotentHint": False, "openWorldHint": False}
+                 "idempotentHint": True, "openWorldHint": False}
 )
 async def kingdee_query_production_plan(params: ProductionPlanQueryInput) -> str:
     """查询生产计划单（PLAN_ProductionPlan）。
@@ -7191,7 +7467,7 @@ class ProductionReportQueryInput(BaseModel):
 @mcp.tool(
     name="kingdee_query_production_report",
     annotations={"title": "生产汇报单查询", "readOnlyHint": True, "destructiveHint": False,
-                 "idempotentHint": False, "openWorldHint": False}
+                 "idempotentHint": True, "openWorldHint": False}
 )
 async def kingdee_query_production_report(params: ProductionReportQueryInput) -> str:
     """查询生产汇报单（PRD_MOReport）。

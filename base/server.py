@@ -54,7 +54,9 @@ def _guard(fn):
 # ── 1. 自省：把实例从常驻 schema 变成按需拉取 ────────────────────
 class DescribeInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    what: str = Field(description="verbs|nouns|states|links|rules|operations")
+    what: str = Field(description="静态本体 verbs|nouns|states|links|rules|operations；"
+                                  "实时元数据 fields（对账套拉该单据的真实字段清单）；"
+                                  "template（已验证的 model 骨架，用于新建单据）")
     key: Optional[str] = Field(default=None, description="具体条目；支持中文名/别名")
 
 
@@ -66,14 +68,28 @@ async def kd_describe(params: DescribeInput) -> str:
     下推关系(links)、规则(rules)、本租户的业务操作入口(operations)。
 
     先用 what='operations' 看有没有现成的业务操作；没有再用 nouns/verbs 自己组。
-    不带 key 返回清单，带 key 返回该条目详情（含可用动词、可下推目标）。"""
+    不带 key 返回清单，带 key 返回该条目详情（含可用动词、可下推目标）。
+
+    what='fields' 走实时元数据：返回该单据在**本账套**的真实字段清单与必填项，
+    用于二开表单——注册表里的 default_fields 是静态的，可能与账套不符。"""
+    if params.what == "template":
+        if not params.key:
+            return _fmt({"ok": False,
+                         "error": "what='template' 需要 key（单据类型），如 key='销售订单'"})
+        return _fmt(await _d().template(params.key))
+    if params.what == "fields":
+        if not params.key:
+            return _fmt({"ok": False,
+                         "error": "what='fields' 需要 key（单据类型），如 key='采购订单'"})
+        return _fmt(await _d().fields(params.key))
     return _fmt(load(tenant=_TENANT).describe(params.what, params.key))
 
 
 # ── 2. 查询 ──────────────────────────────────────────────────────
 class QueryInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    noun: str = Field(description="单据类型，form_id 或中文名，如 '采购订单'")
+    noun: str = Field(description="单据类型，form_id 或中文名，如 '采购订单'。"
+                                  "逗号分隔可一次查多个，如 '销售出库单,采购入库单'")
     filter: str = Field(default="", description="金蝶 FilterString，如 FDate>='2026-01-01'")
     fields: str = Field(default="", description="留空用该单据的默认字段集")
     top: int = Field(default=50, ge=1, le=500)
@@ -83,7 +99,10 @@ class QueryInput(BaseModel):
     "title": "查询单据", "readOnlyHint": True, "idempotentHint": True})
 @_guard
 async def kd_query(params: QueryInput) -> str:
-    """按单据类型查询。字段留空时自动使用该单据的默认字段集。"""
+    """按单据类型查询。字段留空时自动使用该单据的默认字段集。
+
+    系统对象（用户/角色/权限/编码规则/系统参数）会自动走各自的专用端点，
+    调用方不必知道这个区别。多个名词用逗号分隔即可合并查询。"""
     return _fmt(await _d().query(params.noun, params.filter, params.fields, params.top))
 
 
@@ -96,6 +115,8 @@ class ActInput(BaseModel):
     model: Optional[dict] = Field(default=None, description="save 时的单据字段")
     current_state: Optional[str] = Field(default=None, description="已知的当前状态，用于前置校验")
     operation: Optional[str] = Field(default=None, description="二开单的自定义操作编码，覆盖默认值")
+    dry_run: bool = Field(default=False,
+                          description="仅对 save 有效：只做保存前校验，不写入")
 
 
 @mcp.tool(name="kd_act", annotations={
@@ -106,10 +127,12 @@ async def kd_act(params: ActInput) -> str:
     destructive/inverse）与逐目标结果，调用方据此判断失败后能否重试、要不要补偿。
 
     执行前自动校验：动词是否适用于该单据、当前状态是否满足前置条件。
-    不适用时在发请求前就拦下，并给出该单据可用的动词。"""
+    不适用时在发请求前就拦下，并给出该单据可用的动词。
+
+    dry_run=True + verb='save' 只做保存前校验不写入，用于先确认字段是否齐全。"""
     return _fmt(await _d().act(params.verb, params.noun, params.targets,
                                model=params.model, current_state=params.current_state,
-                               operation=params.operation))
+                               operation=params.operation, dry_run=params.dry_run))
 
 
 # ── 4. 下推 ──────────────────────────────────────────────────────
@@ -133,7 +156,40 @@ async def kd_push(params: PushInput) -> str:
                                 params.source_bill_nos, params.rule_id))
 
 
-# ── 5. 业务操作入口 ──────────────────────────────────────────────
+# ── 5. 查看详情 / 报表 ───────────────────────────────────────────
+class ReadInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    noun: str = Field(description="单据类型，form_id 或中文名")
+    bill_id: str = Field(description="单据内码 FID")
+
+
+@mcp.tool(name="kd_read", annotations={
+    "title": "查看单据详情", "readOnlyHint": True, "idempotentHint": True})
+@_guard
+async def kd_read(params: ReadInput) -> str:
+    """按 FID 查看单据完整详情（含分录）。列表查询请用 kd_query。"""
+    return _fmt(await _d().read(params.noun, params.bill_id))
+
+
+class ReportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    noun: str = Field(description="报表标识，如 STK_StockSumReport")
+    payload: dict = Field(default_factory=dict,
+                          description="报表参数（各报表结构不同，需按金蝶报表定义填写）")
+
+
+@mcp.tool(name="kd_report", annotations={
+    "title": "查询报表", "readOnlyHint": True, "idempotentHint": True})
+@_guard
+async def kd_report(params: ReportInput) -> str:
+    """查询金蝶报表（GetSysReportData 端点）。
+
+    报表的参数结构与单据查询完全不同，且每张报表各异，
+    所以单列一个工具而不是塞进 kd_query —— 混在一起会让两边的参数都变得含糊。"""
+    return _fmt(await _d().report(params.noun, params.payload))
+
+
+# ── 6. 业务操作入口 ──────────────────────────────────────────────
 class RunOpInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: str = Field(description="业务操作名，见 kd_describe(what='operations')")
@@ -153,10 +209,11 @@ async def kd_run(params: RunOpInput) -> str:
                                          confirmed=params.confirmed))
 
 
-# ── 6. 过程操作审计 ──────────────────────────────────────────────
+# ── 7. 过程操作审计 ──────────────────────────────────────────────
 class AuditInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    scope: str = Field(default="dangling", description="dangling(未清算的中间态)|recent|trace")
+    scope: str = Field(default="dangling",
+                       description="dangling(未清算的中间态)|recent|trace|usage(调用统计)")
     trace_id: Optional[str] = Field(default=None)
     limit: int = Field(default=20, ge=1, le=200)
 
@@ -177,10 +234,18 @@ async def kd_audit(params: AuditInput) -> str:
                      "tip": "left_objects 里的单据处于中间态，需要继续处理或清理。"})
     if params.scope == "trace":
         return _fmt({"records": [r for r in recs if r["trace_id"] == params.trace_id]})
+    if params.scope == "usage":
+        from collections import Counter
+        by_tool = Counter(r["tool"] for r in recs)
+        by_outcome = Counter(r["outcome"] for r in recs)
+        return _fmt({"total": len(recs), "by_tool": dict(by_tool.most_common(20)),
+                     "by_outcome": dict(by_outcome),
+                     "note": "unknown 表示结果不可判定（服务端可能已生效），"
+                             "与 failed 是两回事。"})
     return _fmt({"records": recs[-params.limit:]})
 
 
-# ── 7. 校验租户配置 ──────────────────────────────────────────────
+# ── 8. 校验租户配置 ──────────────────────────────────────────────
 @mcp.tool(name="kd_check_profile", annotations={
     "title": "校验租户配置", "readOnlyHint": True, "idempotentHint": True})
 @_guard

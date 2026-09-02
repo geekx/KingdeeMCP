@@ -217,13 +217,57 @@ python3 -m wikiskill.retro --reject <id> --note "业务上就是这样"
 | `unlinked_push` | 被 PRE-02 拦下的下推 | 补租户 `links`，或固化正确链路 |
 | `slow` | 超过 5s 的操作 | 收窄字段集、减小批量 |
 
+## 4.5 只读长尾的收敛
+
+97 个工具里有 72 个是只读的。收敛后 **68 个（94%）可由底座的 9 个工具表达**：
+
+```bash
+python3 tools/ontology/measure_convergence.py    # 判定依据是实际端点与 form_id，不是工具名
+```
+
+| 承载工具 | 覆盖 | 说明 |
+|---|---|---|
+| `kd_query` | 57 | 名词登记进注册表即可；支持逗号分隔多名词合并查询 |
+| `kd_read` | 3 | View 端点：单据详情、生产订单、工作流状态 |
+| `kd_audit(usage)` | 2 | 调用统计 |
+| `kd_describe(fields)` | 2 | 实时元数据（对账套拉真实字段清单） |
+| `kd_describe(template)` | 1 | 已验证的 model 骨架 |
+| `kd_act(dry_run)` | 1 | 保存前校验，不写入 |
+| `kd_report` | 1 | 报表端点，参数结构与单据查询完全不同 |
+
+注册表名词从 48 长到 **84**，底座工具从 7 增到 **9**，token 从 1,171 到 1,604 ——
+**名词涨了 75%，token 只涨了 433**。这就是「实例是数据、能力是代码」的实际收益。
+
+### 三类需要额外能力的，如何处理
+
+- **系统对象**（用户/角色/权限/编码规则/序列规则/系统参数）走 `UserService` 等
+  专用端点而非 `ExecuteBillQuery`。注册表用 `system_endpoint` 标注，
+  `kd_query` 自动路由，**调用方不必知道这个区别**。
+- **回退表**：同一份业务数据在不同账套/版本下表名不同，legacy 工具的做法是
+  "主表查不到就换一张"。这些回退表也登记了，但**底座不做隐式回退** ——
+  查不到就报错，由调用方决定换哪张，行为才可预期。
+- **模板与校验**直接委托 legacy 的 `BILL_TEMPLATES` 与 `MetadataValidator`，
+  不在底座里复制一份：两份实现迟早会不一致。
+
+### 刻意不收的 4 个
+
+SQL Server 目录探查（`discover_tables` / `discover_columns` / `describe_table` /
+`discover_metadata_candidates`）数据来自数据库系统表而非金蝶 WebAPI，
+需要另一套凭据（`KINGDEE_SQL_*`），且属于可选功能。
+折叠进 `kd_describe` 会让同一个工具横跨两个数据源、两套权限模型——
+调用方无从判断某次失败是账套问题还是数据库问题。保持独立更清楚。
+
+`tests/test_readonly_convergence.py` 断言覆盖率不许跌破 94%，
+且**每个未收敛的工具都必须登记在 `DELIBERATE` 里并写明理由** ——
+"还没做"和"不打算做"不能混为一谈。
+
 ## 5. 迁移路径
 
 底座与原 97 工具**并存**，不是替换：
 
 1. 原 `src/kingdee_mcp/server.py` 一行未删，现有集成不受影响；
 2. 新集成挂 `base/server.py`（`python3 -m base.server`），token 成本降 97%；
-3. 覆盖率不足时（底座 14 动词覆盖不了的长尾查询），仍可回落到原工具；
+3. 只读长尾已收敛 94%，剩余 4 个 SQL 探查工具仍走原路径（刻意保留，见 4.5）；
 4. WikiSkill 的回溯同时读两边的日志。
 
 ## 6. 目录

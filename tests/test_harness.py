@@ -109,7 +109,7 @@ class TestHarnessRules:
         error_rules = [v for v in violations if v["severity"] == "error"]
         assert any(v["rule_id"] == "RULE-003" for v in error_rules), "应检测到无修正动作"
 
-    def test_rule_003_error_with_recovery(self):
+    def test_rule_003_diagnostic_alone_is_not_recovery(self):
         """RULE-003: 操作失败后有修正动作，应通过"""
         nodes = [
             OpNode(
@@ -126,8 +126,12 @@ class TestHarnessRules:
             ),
         ]
         violations = validate_operation_chain(nodes)
-        error_rules = [v for v in violations if v["severity"] == "error"]
-        assert len(error_rules) == 0, "有修正动作应通过 RULE-003"
+        # 语义收紧（审计 R-3 配套）：只"看一眼"不算修正。
+        # 原实现把「调用了不同工具」就算作修正，一次无意义的查询即可满足，
+        # 约束强度接近于零。现在 view/validate/get_fields 归为**诊断**，
+        # 必须再有改动参数的写操作或补偿动作才算真正修正。
+        assert any(v["rule_id"] == "RULE-003" for v in violations), \
+            "仅诊断不修正，应被 RULE-003 判为未修正"
 
     def test_rule_004_duplicate_query(self):
         """RULE-004: 连续相同查询应检测到无效重复"""

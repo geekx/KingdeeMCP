@@ -63,10 +63,13 @@ class Operation:
 class Noun:
     form_id: str
     zh: str
-    category: str                 # bill | master_data | view
+    category: str                 # bill | master_data | view | system
     allowed_verbs: frozenset[str]
     alias: tuple[str, ...] = ()
     default_fields: str = ""
+    # 系统对象（用户/角色/权限/编码规则…）走各自的专用端点，
+    # 而不是通用的 ExecuteBillQuery。有值即表示"别走通用单据查询"。
+    system_endpoint: str = ""
 
 
 class Ontology:
@@ -95,6 +98,7 @@ class Ontology:
                 allowed_verbs=frozenset(v.get("allowed_verbs") or ()),
                 alias=tuple(v.get("alias") or ()),
                 default_fields=v.get("default_fields", ""),
+                system_endpoint=v.get("system_endpoint", ""),
             ) for k, v in (raw.get("nouns") or {}).items()
         }
         self.states: dict[str, dict] = raw.get("states") or {}
@@ -143,6 +147,7 @@ class Ontology:
         if v.name not in n.allowed_verbs:
             reason = {
                 "view": "这是查询视图，没有自己的生命周期，只能 query",
+                "system": "这是系统对象（用户/角色/权限等），由金蝶系统管理，只能 query",
                 "master_data": "基础资料没有审核流，只有 save/forbid/enable",
             }.get(n.category, "该动词不适用于此名词")
             raise OntologyError(
@@ -206,6 +211,7 @@ class Ontology:
                 return {"form_id": n.form_id, "zh": n.zh, "category": n.category,
                         "alias": list(n.alias), "allowed_verbs": sorted(n.allowed_verbs),
                         "default_fields": n.default_fields,
+                        "system_endpoint": n.system_endpoint or None,
                         "push_targets": [l["to"] for l in self.links if l["from"] == n.form_id]}
             return {"count": len(self.nouns),
                     "nouns": [{"form_id": n.form_id, "zh": n.zh, "category": n.category}

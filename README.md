@@ -2,6 +2,83 @@
 
 > ⚠️ 本项目为**第三方开源**，非金蝶官方出品，与金蝶软件（Kingdee）无任何隶属或授权关系。
 
+<!-- FORK-CHANGES:BEGIN -->
+---
+
+## 本分支的增补：操作原子化审计 + Ontology 建模 + 三层架构
+
+> **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.2.1`
+> **更新于** 2026-09-02 14:34 UTC+08:00
+> **测试** 2682 passed, 401 skipped in 13.53s ｜ **原子性审计** 5 项发现 / 0 项 error
+>
+> 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
+
+这是对上游 [`WaHaiLong/KingdeeMCP`](https://github.com/WaHaiLong/KingdeeMCP) 的一次独立审计与重构增补。
+**上游 97 个工具全部保留，新旧并存**，现有集成不受影响（唯一行为变更见下）。
+
+### 关键指标（均为实测）
+
+| 指标 | 之前 | 现在 |
+|---|---|---|
+| MCP 工具面 `tools/list` | ~46,427 token（200k 上下文的 23%） | ~1,604 token（**-97%**） |
+| 操作链约束层覆盖率 | 25%（24 个写动词只认 3 个） | **100%**（漏登记 = CI 失败） |
+| 自动审计 error | 7 | **0** |
+| 只读工具可由底座表达 | 0 / 72 | **68 / 72（94%）** |
+
+工具从 98 个收敛到 9 个，而注册表里的名词从 48 长到 **84** 个——
+**名词是数据不是能力**：名词涨了 75%，底座工具只多了 2 个。
+
+未收敛的 4 个全是 SQL Server 目录探查，**刻意保留** ——
+它们的数据来自数据库系统表而非金蝶 WebAPI，需要另一套凭据，
+折叠进来会让同一个工具横跨两个数据源、两套权限模型。
+
+### 三层架构
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| MCP 底座 | [`base/`](base/) | 14 个动词 × 84 个名词的组合，9 个通用工具；契约随结果返回；前置规则在发请求前拦截 |
+| Skill 实例层 | [`skill/`](skill/) [`profiles/`](profiles/) | 用法知识渐进披露；**各家二开差异写在租户覆盖层**，业务人员用中文定义业务操作入口 |
+| WikiSkill 自优化 | [`wikiskill/`](wikiskill/) | 每日回溯审计记录 → 跨天印证才浮上来 → 人 adopt 后落地 |
+
+### 快速验证
+
+```bash
+python3 -m pytest tests/ -q                              # 全量测试
+python3 tools/ontology/audit_atomicity.py                # 操作原子化审计（可进 CI）
+python3 tools/ontology/measure_tool_surface.py --both    # token 账
+python3 -m base.validate_profile example-tenant          # 租户配置校验（中文报错）
+python3 -m wikiskill.retro --report                      # 每日回溯
+python3 -m base.server                                   # 启动底座（9 工具）
+```
+
+### 文档
+
+审计报告与本体建模见 **[`docs/ontology/`](docs/ontology/)**：
+[审计报告](docs/ontology/00-atomicity-audit.md) ·
+[抽象层](docs/ontology/01-ontology-abstract.md) ·
+[实例层](docs/ontology/02-ontology-instances.md) ·
+[过程审计记录规范](docs/ontology/03-operation-audit-record.md) ·
+[审计过程记录](docs/ontology/04-audit-trail.md) ·
+[三层架构](docs/ontology/05-architecture.md)
+
+多租户配置填写指南（面向业务人员）：[`profiles/README.md`](profiles/README.md)
+
+### ⚠️ 唯一的行为变更
+
+向 `kingdee_workflow_approve` 传 `action="reject"` 现在返回错误并指向新的
+`kingdee_workflow_reject`。旧行为声称"驳回"实则执行**反审核**（不同语义、绕过工作流引擎），
+且审批意见被接收却**从不写入金蝶**。
+
+### 未解决
+
+- **A-5** `save`/`push` 无客户端幂等键，重试无法去重——需服务端配合
+- **L-2** `PRD_PickMtrl → PRD_Instock` 是否为有效转换关系**存疑**，已标 `verified: suspect`，需真实账套验证
+- **F-1** 默认字段集有两套事实来源，14 处不一致，同样需账套验证
+
+> 本次审计为**静态分析**，未连接真实金蝶账套。凡依赖服务端行为的结论均已标注存疑。
+
+<!-- FORK-CHANGES:END -->
+
 [![PyPI version](https://img.shields.io/pypi/v/kingdee-mcp?style=flat-square&color=2563eb)](https://pypi.org/project/kingdee-mcp/)
 [![Downloads](https://img.shields.io/pypi/dm/kingdee-mcp?style=flat-square&color=10b981)](https://pypi.org/project/kingdee-mcp/)
 [![Python versions](https://img.shields.io/pypi/pyversions/kingdee-mcp?style=flat-square)](https://pypi.org/project/kingdee-mcp/)

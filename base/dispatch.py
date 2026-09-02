@@ -29,6 +29,24 @@ class _Reuse:
     def __exit__(self, *exc): return False
 
 
+def _rows_of(result: Any) -> list:
+    """从金蝶返回里取数据行。ExecuteBillQuery 直接返回数组，其它端点包一层。"""
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for k in ("Result", "data", "Rows"):
+            v = result.get(k)
+            if isinstance(v, list):
+                return v
+        inner = result.get("Result")
+        if isinstance(inner, dict):
+            for k in ("Result", "Rows", "data"):
+                v = inner.get(k)
+                if isinstance(v, list):
+                    return v
+    return []
+
+
 def _ok(result: Any) -> tuple[bool, list]:
     rs = result.get("Result", result) if isinstance(result, dict) else {}
     st = rs.get("ResponseStatus", {})
@@ -56,7 +74,17 @@ class Dispatcher:
     async def act(self, verb: str, noun: str, targets: list[str],
                   model: Optional[dict] = None, current_state: Optional[str] = None,
                   operation: Optional[str] = None, on_behalf_of: Optional[str] = None,
-                  no_by_id: Optional[dict[str, str]] = None) -> dict:
+                  no_by_id: Optional[dict[str, str]] = None,
+                  dry_run: bool = False) -> dict:
+        if dry_run:
+            # 目前只有 save 能真正"预演"（金蝶提供保存前校验）。
+            # 其它动词没有对应的 dry-run 接口，谎称支持只会误导调用方。
+            if verb != "save":
+                raise OntologyError(
+                    f"dry_run 目前只支持 verb='save'（保存前校验）。"
+                    f"{verb} 没有对应的预演接口——要确认状态请先用 kd_read 查当前值。")
+            return await self.validate(noun, model or {})
+
         v, n = self.o.check_verb_applies(verb, noun)
         # 上游（如 push）已知的 FID→单据编号映射。带上它，审计记录里同一张单
         # 才不会因为一步只有 FID、另一步只有单据编号而被算成两个对象。
@@ -189,10 +217,75 @@ class Dispatcher:
     # ── 读动词 ────────────────────────────────────────────────
     async def query(self, noun: str, filter_string: str = "",
                     fields: str = "", top: int = 50) -> dict:
-        _, n = self.o.check_verb_applies("query", noun)
-        rows = await self.t.query(n.form_id, fields or n.default_fields, filter_string, top)
-        return {"noun": n.form_id, "zh": n.zh, "count": len(rows) if isinstance(rows, list) else 0,
-                "rows": rows}
+        """查询。支持逗号分隔的多个名词（合并查询，如"销售出库单,采购入库单"）。
+
+        系统对象（用户/角色/权限…）走各自的专用端点，由注册表的
+        system_endpoint 决定，调用方不必知道这个区别。
+        """
+        refs = [x.strip() for x in noun.split(",") if x.strip()] if isinstance(noun, str) else list(noun)
+        if len(refs) > 1:
+            groups = []
+            for ref in refs:
+                try:
+                    groups.append(await self.query(ref, filter_string, fields, top))
+                except OntologyError as e:
+                    groups.append({"noun": ref, "error": str(e)})
+            return {"nouns": refs, "total": sum(g.get("count", 0) for g in groups),
+                    "groups": groups}
+
+        _, n = self.o.check_verb_applies("query", refs[0])
+        fk = fields or n.default_fields
+        if n.system_endpoint:
+            rows = await self.t.system_query(n.system_endpoint, n.form_id, fk, filter_string, top)
+        else:
+            rows = await self.t.query(n.form_id, fk, filter_string, top)
+        rows = rows if isinstance(rows, list) else _rows_of(rows)
+        return {"noun": n.form_id, "zh": n.zh, "category": n.category,
+                "count": len(rows), "fields": fk, "rows": rows}
+
+    async def read(self, noun: str, bill_id: str) -> dict:
+        """查看单据详情（View 端点）。"""
+        _, n = self.o.check_verb_applies("read", noun)
+        result = await self.t.view(n.form_id, str(bill_id))
+        data = result.get("Result", {}).get("Result", result) if isinstance(result, dict) else result
+        return {"noun": n.form_id, "zh": n.zh, "bill_id": str(bill_id), "data": data}
+
+    async def fields(self, noun: str) -> dict:
+        """实时字段清单（对账套拉元数据，不是注册表里的静态默认字段集）。"""
+        n = self.o.resolve_noun(noun)
+        data = await self.t.fields(n.form_id)
+        if data is None:
+            raise OntologyError(
+                f"拉不到 {n.form_id} 的元数据。可能是 form_id 在本账套不存在，"
+                f"或网络/登录态有问题。用 kd_describe(what='nouns') 确认名词是否正确。")
+        return {"noun": n.form_id, "zh": n.zh, **data}
+
+    async def template(self, noun: str) -> dict:
+        """已验证的 model 骨架：AI 只需替换占位符，跳过字段名摸索。"""
+        n = self.o.resolve_noun(noun)
+        tpl = await self.t.template(n.form_id)
+        if tpl is None:
+            raise OntologyError(
+                f"{n.form_id} 没有内置模板。可用 kd_describe(what='fields', key=…) "
+                f"拉本账套的真实字段清单，或先 kd_query 取一条已有单据参考结构。")
+        return {"noun": n.form_id, "zh": n.zh, "template": tpl,
+                "tip": "占位符形如 <客户编码>，替换后建议先 kd_act(dry_run=True) 校验。"}
+
+    async def validate(self, noun: str, model: dict) -> dict:
+        """保存前校验（不写入）。对应 kd_act(verb='save', dry_run=True)。"""
+        _, n = self.o.check_verb_applies("save", noun)
+        return {"noun": n.form_id, "zh": n.zh, "dry_run": True,
+                **(await self.t.validate(n.form_id, model))}
+
+    async def report(self, noun: str, payload: dict) -> dict:
+        """报表查询（GetSysReportData 端点，payload 结构与单据查询不同）。"""
+        n = self.o.resolve_noun(noun) if noun in self.o.nouns or noun in self.o._alias_index \
+            else None
+        form_id = n.form_id if n else noun
+        result = await self.t.report(form_id, payload)
+        rs = result.get("Result", result) if isinstance(result, dict) else {}
+        rows = rs.get("Rows") or rs.get("rows") or []
+        return {"noun": form_id, "count": len(rows), "rows": rows, "raw": rs}
 
     # ── 业务操作入口（面向人的那一层）──────────────────────────
     async def run_operation(self, key: str, targets: list[str],

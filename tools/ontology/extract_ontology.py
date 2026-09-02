@@ -76,9 +76,31 @@ def extract_tools(tree: ast.Module) -> list[dict]:
                                or "for fid in target_fids" in body_src,
                 "ids_joined": '",".join' in body_src,
                 "src": body_src,
+                # _result_status(result, "<label>") 里的标签才是 DOC_LIFECYCLE 的键，
+                # 传输端点名（execute/cancel_assign）并不是。
+                "op_labels": sorted(_result_status_labels(body_src)),
             })
     rows.sort(key=lambda r: r["line"])
     return rows
+
+
+def _result_status_labels(body_src: str) -> set[str]:
+    """抽出函数体内 _result_status(..., "<label>") 与 _run_execute_action 的 op_label。"""
+    found: set[str] = set()
+    try:
+        fn = ast.parse(body_src).body[0]
+    except SyntaxError:
+        return found
+    for n in ast.walk(fn):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
+            continue
+        if n.func.id == "_result_status" and len(n.args) >= 2 \
+                and isinstance(n.args[1], ast.Constant):
+            found.add(n.args[1].value)
+        if n.func.id == "_run_execute_action" and len(n.args) >= 3 \
+                and isinstance(n.args[2], ast.Constant):
+            found.add(n.args[2].value)
+    return found
 
 
 def _endpoints_called(body_src: str) -> set[str]:
