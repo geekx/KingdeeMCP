@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
 
+from base.objects import ObjectModel                            # noqa: E402
 from base.ontology import Ontology, OntologyError, load        # noqa: E402
 from base.transport import KingdeeTransport, Transport         # noqa: E402
 from operation_audit import audit_recorder                     # noqa: E402
@@ -27,6 +28,26 @@ class _Reuse:
     def __init__(self, op): self._op = op
     def __enter__(self): return self._op
     def __exit__(self, *exc): return False
+
+
+def _flatten_props(data: Any) -> dict:
+    """把 View 返回的嵌套结构压平成属性字典。
+
+    金蝶 View 的返回层级各表单不一，这里只做一层保守展开：
+    顶层标量直接取，嵌套对象取其 FName/FNumber 作为 '父.子' 属性。
+    取不到就不编——宁可属性少，也不要伪造值。
+    """
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            out[k] = v
+        elif isinstance(v, dict):
+            for sub in ("FName", "FNumber", "Name", "Number"):
+                if sub in v and isinstance(v[sub], (str, int, float)):
+                    out[f"{k}.{sub}"] = v[sub]
+    return out
 
 
 def _rows_of(result: Any) -> list:
@@ -65,6 +86,7 @@ class Dispatcher:
         self.o = ontology or load()
         self.t = transport or KingdeeTransport()
         self.actor = actor
+        self.m = ObjectModel(self.o)
         # 业务操作执行期间共享的审计上下文：让一次操作的所有步骤共用同一 trace_id。
         # 没有它，run_operation 的每一步会各开一条 trace，
         # 悬挂链检测就只能看到"某个 kd_push 失败"，而看不到"『采购收货入库』停在第 2 步"。
@@ -249,6 +271,113 @@ class Dispatcher:
         result = await self.t.view(n.form_id, str(bill_id))
         data = result.get("Result", {}).get("Result", result) if isinstance(result, dict) else result
         return {"noun": n.form_id, "zh": n.zh, "bill_id": str(bill_id), "data": data}
+
+    # ── 对象层：以对象为中心的入口（Palantir Ontology 式）────────
+    async def object_card(self, noun: str, obj_id: Optional[str] = None) -> dict:
+        """打开一个对象：属性 + 状态 + 此刻能做什么 + 连到什么。
+
+        不带 obj_id 时返回**类型卡片**（这类对象长什么样、能做什么），
+        与实例卡片同形状 —— 使用者不必学两套结构。
+        """
+        if obj_id is None:
+            card = self.m.card(noun)
+            card["hint"] = ("这是类型卡片。带 id 可打开具体对象；"
+                            "actions 里的 enabled 此时只反映'该类型是否支持'，"
+                            "不反映'这一张单此刻能不能做'。")
+            return card
+
+        ot = self.m.object_type(noun)
+        raw = await self.read(noun, obj_id)
+        props = _flatten_props(raw.get("data"))
+        if not props:
+            # View 拿不到就退回按标识查一行——有些视图类对象没有 View 接口
+            key = ot.title_property if not str(obj_id).isdigit() else ot.id_property
+            q = await self.query(noun, f"{key}='{obj_id}'", top=1)
+            rows = q.get("rows") or []
+            props = rows[0] if rows else {}
+        if not props:
+            raise OntologyError(
+                f"没找到 {ot.form_id} 中标识为 {obj_id!r} 的对象。"
+                f"确认传的是内码 {ot.id_property} 还是编号 {ot.title_property}——"
+                f"两者不通用，系统也没有提供二者的解析动词（审计 L-3）。")
+        return self.m.card(noun, props)
+
+    def identify(self, bill_no: str) -> dict:
+        """按编号前缀识别单据类型。启发式，返回候选而非断言。"""
+        return self.m.identify(bill_no)
+
+    async def navigate(self, noun: str, to: str, bill_no: str,
+                       try_candidates: bool = True, top: int = 20) -> dict:
+        """从一个对象跳到它的下游单据。
+
+        下游单据引用源单的字段名随表单与二开而异，静态推断不出唯一答案。
+        以前这里只返回候选过滤式让调用方自己试；现在**替它试**：
+        逐个候选查一次，命中即返回结果并说明是哪个字段生效。
+
+        命中之后会向知识库提一条「把 link_filter 写进 profile」的建议
+        （只提议，不自动改配置）——试出来的答案不该下次再试一遍。
+        """
+        link = self.o.check_link(noun, to)
+        plan = self.m.navigate(noun, to, bill_no)
+        if plan.get("confirmed"):
+            rows = await self.query(to, plan["filter"], top=top)
+            return {**plan, "rows": rows.get("rows", []), "count": rows.get("count", 0)}
+        if not try_candidates:
+            return plan
+
+        tried: list[dict] = []
+        for flt in plan["candidate_filters"]:
+            try:
+                r = await self.query(to, flt, top=top)
+            except Exception as exc:                 # 字段不存在会报错，属正常淘汰
+                tried.append({"filter": flt, "error": f"{type(exc).__name__}: {exc}"[:160]})
+                continue
+            n = r.get("count", 0)
+            tried.append({"filter": flt, "count": n})
+            if n:
+                self._propose_link_filter(noun, to, flt, link)
+                return {**plan, "confirmed_by_probe": True, "filter": flt,
+                        "rows": r.get("rows", []), "count": n, "tried": tried,
+                        "remember": plan["remember"],
+                        "note": (f"用 {flt.split('=')[0]} 查到了 {n} 条。"
+                                 f"这是**探测出来的**，不是账套确认的字段——"
+                                 f"把它写进 profile 之前建议人眼核对一下。")}
+        return {**plan, "confirmed_by_probe": False, "rows": [], "count": 0,
+                "tried": tried,
+                "note": ("所有候选字段都没查到下游单。可能确实还没下推，"
+                         "也可能本账套用了别的关联字段——"
+                         f"用 kd_describe(what='fields', key='{self.o.resolve_noun(to).form_id}') "
+                         "看真实字段清单。")}
+
+    def _propose_link_filter(self, src: str, dst: str, flt: str, link: dict) -> None:
+        """把探测出来的关联字段提给知识库。只提议，不自动改配置。"""
+        try:
+            import sys as _sys
+            from pathlib import Path as _P
+            _sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+            from wikiskill.knowledge import Entry, Knowledge
+            import hashlib
+            s = self.o.resolve_noun(src).form_id
+            t = self.o.resolve_noun(dst).form_id
+            field = flt.split("=")[0]
+            k = Knowledge()
+            k.merge(Entry(
+                id=hashlib.sha1(f"linkfilter|{s}|{t}".encode()).hexdigest()[:12],
+                kind="link_filter_learned",
+                title=f"{s} → {t} 的关联字段探测为 {field}",
+                detail=f"用 {flt} 查到了下游单据。",
+                suggestion=(f"人眼核对后，在 profiles/<租户>/profile.yml 的 links 里给 "
+                            f"{{from: {s}, to: {t}}} 加 "
+                            f"link_filter: \"{field}='{{bill_no}}'\"，此后不必再逐个试。"),
+                occurrences=1,
+                evidence=[{"from": s, "to": t, "filter": flt}]))
+            k.save()
+        except Exception:
+            pass  # 知识库不可用不该连累导航
+
+    def search_types(self, keyword: str = "", category: str = "") -> dict:
+        types = self.m.search_types(keyword, category)
+        return {"count": len(types), "types": types}
 
     async def fields(self, noun: str) -> dict:
         """实时字段清单（对账套拉元数据，不是注册表里的静态默认字段集）。"""

@@ -98,6 +98,7 @@ def render(d: dict) -> str:
 |---|---|---|
 | MCP 底座 | [`base/`](base/) | {d['verbs']} 个动词 × {d['nouns']} 个名词的组合，{d['base_tools']} 个通用工具；契约随结果返回；前置规则在发请求前拦截 |
 | Skill 实例层 | [`skill/`](skill/) [`profiles/`](profiles/) | 用法知识渐进披露；**各家二开差异写在租户覆盖层**，业务人员用中文定义业务操作入口 |
+| 对象层（两种形态） | [`base/objects.py`](base/objects.py) · [`ui/`](docs/ontology/ui/) | 以对象为中心操作：属性 / 状态 / **此刻能做什么** / 连到什么。Skill 形态给 Claude，[界面形态](https://claude.ai/code/artifact/91595855-e6de-4182-8369-ddaa7c09fd50)给人 |
 | WikiSkill 自优化 | [`wikiskill/`](wikiskill/) | 每日回溯审计记录 → 跨天印证才浮上来 → 人 adopt 后落地 |
 
 ### 快速验证

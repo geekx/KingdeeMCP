@@ -156,7 +156,55 @@ async def kd_push(params: PushInput) -> str:
                                 params.source_bill_nos, params.rule_id))
 
 
-# ── 5. 查看详情 / 报表 ───────────────────────────────────────────
+# ── 5. 对象层：以对象为中心的操作面 ──────────────────────────────
+class ObjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    noun: str = Field(default="", description="对象类型，form_id 或中文名。留空则列出所有类型")
+    id: Optional[str] = Field(default=None,
+                              description="对象标识（内码或单据编号）。不给则返回类型卡片")
+    search: str = Field(default="", description="按关键字搜索对象类型")
+    category: str = Field(default="", description="按类别过滤：bill|master_data|view|system")
+    navigate_to: Optional[str] = Field(
+        default=None, description="要跳转到的下游单据类型（需同时给 id 作为源单编号）")
+    identify: str = Field(default="",
+                          description="只给单据编号、不知道是什么单时，填在这里")
+
+
+@mcp.tool(name="kd_object", annotations={
+    "title": "打开对象", "readOnlyHint": True, "idempotentHint": True})
+@_guard
+async def kd_object(params: ObjectInput) -> str:
+    """以**对象**为中心操作，而不是以工具为中心。
+
+    打开一个对象，一次拿到：它的属性、它现在处于什么状态、
+    **此刻能对它做哪些动作**（不能做的会说明为什么、要先做什么）、
+    以及它连到哪些别的对象。
+
+    用法：
+      kd_object(identify="CGDD000231")           只有单号、不知道是什么单
+      kd_object(search="采购")                    搜索对象类型
+      kd_object(noun="采购订单")                  类型卡片：这类对象长什么样、能做什么
+      kd_object(noun="采购订单", id="CGDD000231")  实例卡片：这一张单此刻能做什么
+      kd_object(noun="采购订单", id="CGDD000231", navigate_to="采购入库单")
+                                                查它的下游单据
+
+    卡片里的 operations 是本租户已经编排好的业务操作——有现成的就别自己拼步骤。
+    拿到 actions 里 enabled=true 的动词后，用 kd_act 执行。"""
+    d = _d()
+    if params.identify:
+        return _fmt(d.identify(params.identify))
+    if params.navigate_to:
+        if not params.id:
+            return _fmt({"ok": False, "error": "navigate_to 需要同时给 id（源单编号）"})
+        return _fmt(await d.navigate(params.noun, params.navigate_to, params.id))
+    if not params.noun:
+        return _fmt(d.search_types(params.search, params.category))
+    if params.search:
+        return _fmt(d.search_types(params.search, params.category))
+    return _fmt(await d.object_card(params.noun, params.id))
+
+
+# ── 6. 查看详情 / 报表 ───────────────────────────────────────────
 class ReadInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     noun: str = Field(description="单据类型，form_id 或中文名")
@@ -189,7 +237,7 @@ async def kd_report(params: ReportInput) -> str:
     return _fmt(await _d().report(params.noun, params.payload))
 
 
-# ── 6. 业务操作入口 ──────────────────────────────────────────────
+# ── 7. 业务操作入口 ──────────────────────────────────────────────
 class RunOpInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: str = Field(description="业务操作名，见 kd_describe(what='operations')")
@@ -209,7 +257,7 @@ async def kd_run(params: RunOpInput) -> str:
                                          confirmed=params.confirmed))
 
 
-# ── 7. 过程操作审计 ──────────────────────────────────────────────
+# ── 8. 过程操作审计 ──────────────────────────────────────────────
 class AuditInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scope: str = Field(default="dangling",
@@ -245,7 +293,7 @@ async def kd_audit(params: AuditInput) -> str:
     return _fmt({"records": recs[-params.limit:]})
 
 
-# ── 8. 校验租户配置 ──────────────────────────────────────────────
+# ── 9. 校验租户配置 ──────────────────────────────────────────────
 @mcp.tool(name="kd_check_profile", annotations={
     "title": "校验租户配置", "readOnlyHint": True, "idempotentHint": True})
 @_guard

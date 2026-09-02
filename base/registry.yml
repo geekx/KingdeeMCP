@@ -871,6 +871,29 @@ nouns:
     # 注：审计 R-7 指出 kingdee_workflow_reject 走 unaudit 端点会**绕过工作流引擎**，
     #     该表不会被更新。要确认审批实例的真实状态，查这张表而不是单据状态。
 
+
+# ── 单据编号前缀（启发式，用于「这张单是什么单」）──────────────
+#
+# ⚠️ 编号前缀由金蝶的**编码规则**决定，是租户可配的（见名词 SYS_NumberRule）。
+#    所以这张表是**启发式**，不是铁律：命中只说明"很可能是"，
+#    没命中也不说明"不是"。各家改了编码规则就在 profile 里覆盖本段。
+#
+# evidence 记出处——每条都来自本仓库里真实出现过的单据号，不是编的。
+bill_prefixes:
+  CGDD:  {form_id: PUR_PurchaseOrder, evidence: "examples/push-stock-in.md；且 FBillTypeID=CGDD01_SYS"}
+  CGRK:  {form_id: STK_InStock,       evidence: "examples/procurement-query.md"}
+  CGRKD: {form_id: STK_InStock,       evidence: "examples/procurement-audit.md"}
+  RKD:   {form_id: STK_InStock,       evidence: "examples/production-mgmt.md 的 target_bill_nos"}
+  XSDD:  {form_id: SAL_SaleOrder,     evidence: "examples/workflow-approve.md"}
+  XSCKD: {form_id: SAL_OUTSTOCK,      evidence: "examples/push-stock-in.md 的 target_bill_nos"}
+  XSBJD: {form_id: SAL_Quotation,     evidence: "docs/mcp_optimization_notes.md；且 FBillTypeID=XSBJD01_SYS"}
+  MO:    {form_id: PRD_MO,            evidence: "examples/production-mgmt.md"}
+  LLD:   {form_id: PRD_PickMtrl,      evidence: "examples/production-mgmt.md"}
+  SCRK:  {form_id: PRD_Instock,       evidence: "tests/e2e/test_production_workflow.py"}
+  DB:    {form_id: STK_TransferDirect, evidence: "examples/stock-transfer.md"}
+  IQC:   {form_id: QIS_InspectBill,   evidence: "examples/quality-inspection.md"}
+  RFQ:   {form_id: SVM_InquiryBill,   evidence: "examples/purchase-inquiry.md"}
+
 # ── 状态：唯一权威词表（审计 S-1 / S-2 的对症设计）──────────────
 # 此前 DOC_LIFECYCLE 用中文名、SQL 过滤用字母码，两套互不映射；
 # 且 'D' 同时被划入 pending 与 rejected。这里统一为规范码。

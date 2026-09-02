@@ -8,8 +8,8 @@
 ## 本分支的增补：操作原子化审计 + Ontology 建模 + 三层架构
 
 > **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.2.1`
-> **更新于** 2026-09-02 14:34 UTC+08:00
-> **测试** 2682 passed, 401 skipped in 13.53s ｜ **原子性审计** 5 项发现 / 0 项 error
+> **更新于** 2026-09-02 19:38 UTC+08:00
+> **测试** 2724 passed, 401 skipped in 21.87s ｜ **原子性审计** 5 项发现 / 0 项 error
 >
 > 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
 
@@ -20,12 +20,12 @@
 
 | 指标 | 之前 | 现在 |
 |---|---|---|
-| MCP 工具面 `tools/list` | ~46,427 token（200k 上下文的 23%） | ~1,604 token（**-97%**） |
+| MCP 工具面 `tools/list` | ~46,427 token（200k 上下文的 23%） | ~1,993 token（**-96%**） |
 | 操作链约束层覆盖率 | 25%（24 个写动词只认 3 个） | **100%**（漏登记 = CI 失败） |
 | 自动审计 error | 7 | **0** |
 | 只读工具可由底座表达 | 0 / 72 | **68 / 72（94%）** |
 
-工具从 98 个收敛到 9 个，而注册表里的名词从 48 长到 **84** 个——
+工具从 98 个收敛到 10 个，而注册表里的名词从 48 长到 **84** 个——
 **名词是数据不是能力**：名词涨了 75%，底座工具只多了 2 个。
 
 未收敛的 4 个全是 SQL Server 目录探查，**刻意保留** ——
@@ -36,8 +36,9 @@
 
 | 层 | 位置 | 作用 |
 |---|---|---|
-| MCP 底座 | [`base/`](base/) | 14 个动词 × 84 个名词的组合，9 个通用工具；契约随结果返回；前置规则在发请求前拦截 |
+| MCP 底座 | [`base/`](base/) | 14 个动词 × 84 个名词的组合，10 个通用工具；契约随结果返回；前置规则在发请求前拦截 |
 | Skill 实例层 | [`skill/`](skill/) [`profiles/`](profiles/) | 用法知识渐进披露；**各家二开差异写在租户覆盖层**，业务人员用中文定义业务操作入口 |
+| 对象层（两种形态） | [`base/objects.py`](base/objects.py) · [`ui/`](docs/ontology/ui/) | 以对象为中心操作：属性 / 状态 / **此刻能做什么** / 连到什么。Skill 形态给 Claude，[界面形态](https://claude.ai/code/artifact/91595855-e6de-4182-8369-ddaa7c09fd50)给人 |
 | WikiSkill 自优化 | [`wikiskill/`](wikiskill/) | 每日回溯审计记录 → 跨天印证才浮上来 → 人 adopt 后落地 |
 
 ### 快速验证
@@ -48,7 +49,7 @@ python3 tools/ontology/audit_atomicity.py                # 操作原子化审计
 python3 tools/ontology/measure_tool_surface.py --both    # token 账
 python3 -m base.validate_profile example-tenant          # 租户配置校验（中文报错）
 python3 -m wikiskill.retro --report                      # 每日回溯
-python3 -m base.server                                   # 启动底座（9 工具）
+python3 -m base.server                                   # 启动底座（10 工具）
 ```
 
 ### 文档
