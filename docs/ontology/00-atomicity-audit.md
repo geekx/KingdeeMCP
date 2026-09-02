@@ -387,7 +387,7 @@ $ python3 tools/ontology/operation_audit.py docs/ontology/samples/operation_audi
   [悬挂操作链] ad3be388 kingdee_save_bill 停在第 1 步，遗留 []，末状态=None (unknown)
 ```
 
-自测：`python3 tools/ontology/test_operation_audit.py`（4 项，全部通过）。
+自测：`python3 -m pytest tests/test_operation_audit.py`（4 项，全部通过）。
 
 ---
 

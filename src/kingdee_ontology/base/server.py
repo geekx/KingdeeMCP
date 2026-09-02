@@ -12,17 +12,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
 from typing import Any, Optional
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
-from base.dispatch import Dispatcher  # noqa: E402
-from base.ontology import OntologyError, load  # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher  # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load  # noqa: E402
 
 mcp = FastMCP("kingdee-base")
 
@@ -328,8 +324,7 @@ class AuditInput(BaseModel):
 async def kd_audit(params: AuditInput) -> str:
     """查过程操作审计记录。scope='dangling' 列出**未清算的中间态**：
     有写操作已生效、但整条操作链没走到终态且无补偿的单据。"""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
-    from operation_audit import dangling_traces, load as load_audit
+    from kingdee_ontology.operation_audit import dangling_traces, load as load_audit
     recs = load_audit(os.environ.get("KINGDEE_OPERATION_AUDIT_LOG", "operation_audit.jsonl"))
     if params.scope == "dangling":
         d = dangling_traces(recs)
@@ -356,7 +351,7 @@ async def kd_audit(params: AuditInput) -> str:
 async def kd_check_profile(tenant: str = "") -> str:
     """校验租户配置（二开表单/操作码/下推关系/业务操作入口）是否填写正确。
     返回中文的错误与建议，供业务人员自行修正 profiles/<租户>/profile.yml。"""
-    from base.validate_profile import validate
+    from kingdee_ontology.base.validate_profile import validate
     errs, warns = validate(tenant or _TENANT)
     return _fmt({"tenant": tenant or _TENANT, "ok": not errs,
                  "errors": errs, "warnings": warns})

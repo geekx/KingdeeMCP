@@ -7,7 +7,7 @@ Harness — Kingdee MCP 操作约束与反馈循环层
 - failure_trace: 失败模式 → 文档追溯系统
 
 用法：
-    from harness import FeedbackLoop, validate_operation_chain
+    from kingdee_ontology.harness import FeedbackLoop, validate_operation_chain
 
     # 追踪操作链
     tracker = FeedbackLoop()
@@ -15,13 +15,13 @@ Harness — Kingdee MCP 操作约束与反馈循环层
     violations = tracker.check_violations()
 """
 
-from harness.rules import (
+from kingdee_ontology.harness.rules import (
     HARNESS_RULES,
     OpNode,
     HarnessRule,
     validate_operation_chain,
 )
-from harness.feedback_loop import (
+from kingdee_ontology.harness.feedback_loop import (
     FeedbackLoop,
     generate_loop_hint,
 )

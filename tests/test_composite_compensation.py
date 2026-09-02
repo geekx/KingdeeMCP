@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools" / "ontology"))
 
 import kingdee_mcp.server as srv  # noqa: E402
-from operation_audit import AuditRecorder, dangling_traces, load  # noqa: E402
+from kingdee_ontology.operation_audit import AuditRecorder, dangling_traces, load  # noqa: E402
 
 SAVE_OK = {"Result": {"ResponseStatus": {"IsSuccess": True},
                       "Id": "100231", "Number": "CGDD000231"}}
@@ -30,7 +30,7 @@ def audit_log(tmp_path, monkeypatch):
     """把过程审计重定向到临时文件，并让 server 内部的懒导入拿到同一个记录器。"""
     path = tmp_path / "operation_audit.jsonl"
     monkeypatch.setenv("KINGDEE_OPERATION_AUDIT_LOG", str(path))
-    import operation_audit as oa
+    import kingdee_ontology.operation_audit as oa
     monkeypatch.setattr(oa, "audit_recorder", AuditRecorder(path))
     return path
 

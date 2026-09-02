@@ -1,8 +1,8 @@
 """每日回溯 —— 从过程操作审计记录里提炼可执行的改进项。
 
-    python3 -m wikiskill.retro                      # 回溯昨天+今天，更新知识库
-    python3 -m wikiskill.retro --day 2026-09-02     # 指定日期
-    python3 -m wikiskill.retro --report             # 只看当前可执行项，不写入
+    python3 -m kingdee_ontology.wikiskill.retro                      # 回溯昨天+今天，更新知识库
+    python3 -m kingdee_ontology.wikiskill.retro --day 2026-09-02     # 指定日期
+    python3 -m kingdee_ontology.wikiskill.retro --report             # 只看当前可执行项，不写入
 
 自优化的闭环：
     kd_act / kd_push / kd_run  →  operation_audit.jsonl
@@ -28,11 +28,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
+# operation_audit 现在住在包里（它是运行期代码，不是仓库工具），
+# 不再需要往 sys.path 里塞仓库路径——那种写法装成 wheel 之后必然失效。
 
-from operation_audit import dangling_traces, load as load_audit  # noqa: E402
-from wikiskill.knowledge import Entry, Knowledge  # noqa: E402
+from kingdee_ontology.operation_audit import dangling_traces, load as load_audit  # noqa: E402
+from kingdee_ontology.wikiskill.knowledge import Entry, Knowledge  # noqa: E402
 
 # 低于这个次数不成条目——避免把偶发噪声写进知识库
 _MIN_OCCURRENCES = 2
@@ -206,7 +206,7 @@ def render(result: dict) -> str:
             lines += ["", f"### [{e['confidence']}] {e['title']}",
                       f"- 累计 {e['occurrences']} 次，跨 {e['days']} 天　`{e['id']}`",
                       f"- 建议：{e['suggestion']}",
-                      f"- 处置：`python3 -m wikiskill.retro --adopt {e['id']}` "
+                      f"- 处置：`python3 -m kingdee_ontology.wikiskill.retro --adopt {e['id']}` "
                       f"或 `--reject {e['id']} --note \"理由\"`"]
     return "\n".join(lines)
 

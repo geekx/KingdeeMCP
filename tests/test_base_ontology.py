@@ -10,9 +10,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.dispatch import Dispatcher            # noqa: E402
-from base.ontology import OntologyError, load   # noqa: E402
-from base.transport import FakeTransport        # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher            # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load   # noqa: E402
+from kingdee_ontology.base.transport import FakeTransport        # noqa: E402
 
 OK = {"Result": {"ResponseStatus": {"IsSuccess": True}, "Id": "1001", "Number": "T0001"}}
 FAIL = {"Result": {"ResponseStatus": {"IsSuccess": False,
@@ -24,9 +24,9 @@ PUSH_OK = {"Result": {"ResponseStatus": {"IsSuccess": True},
 @pytest.fixture(autouse=True)
 def _isolated_audit(tmp_path, monkeypatch):
     monkeypatch.setenv("KINGDEE_OPERATION_AUDIT_LOG", str(tmp_path / "audit.jsonl"))
-    import operation_audit as oa
+    import kingdee_ontology.operation_audit as oa
     monkeypatch.setattr(oa, "audit_recorder", oa.AuditRecorder(tmp_path / "audit.jsonl"))
-    import base.dispatch as bd
+    import kingdee_ontology.base.dispatch as bd
     monkeypatch.setattr(bd, "audit_recorder", oa.audit_recorder)
     return tmp_path / "audit.jsonl"
 
@@ -229,13 +229,13 @@ class TestOperationEntrypoints:
 
 class TestProfileValidation:
     def test_example_tenant_is_valid(self):
-        from base.validate_profile import validate
+        from kingdee_ontology.base.validate_profile import validate
         errs, _ = validate("example-tenant")
         assert errs == []
 
     def test_broken_profile_reports_chinese_errors(self, tmp_path, monkeypatch):
-        from base import ontology as ont
-        from base.validate_profile import validate
+        from kingdee_ontology.base import ontology as ont
+        from kingdee_ontology.base.validate_profile import validate
         bad = {"tenant": "bad", "operations": {"乱写": {"steps": [
             {"做": "下推", "从": "SAL_SaleOrder", "到": "PRD_MO"},
             {"做": "audit", "对象": "BD_Material", "用": "targets"},
@@ -243,7 +243,7 @@ class TestProfileValidation:
         ]}}}
         monkeypatch.setattr(ont, "load_profile",
                             lambda t: bad if t == "bad" else None)
-        import base.validate_profile as vp
+        import kingdee_ontology.base.validate_profile as vp
         monkeypatch.setattr(vp, "load_profile", lambda t: bad if t == "bad" else None)
         ont.load.cache_clear()
         errs, warns = validate("bad")

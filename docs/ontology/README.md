@@ -43,9 +43,9 @@
 
 ```bash
 python3 tools/ontology/measure_tool_surface.py --both   # 复现 token 账
-python3 -m base.server                                  # 启动底座
-python3 -m base.validate_profile example-tenant         # 校验租户配置
-python3 -m wikiskill.retro                              # 每日回溯
+python3 -m kingdee_ontology.base.server                                  # 启动底座
+python3 -m kingdee_ontology.base.validate_profile example-tenant         # 校验租户配置
+python3 -m kingdee_ontology.wikiskill.retro                              # 每日回溯
 ```
 
 ## 工具
@@ -61,7 +61,7 @@ python3 tools/ontology/audit_atomicity.py --json
 
 # 过程操作审计记录器 —— 悬挂操作链检测
 python3 tools/ontology/operation_audit.py docs/ontology/samples/operation_audit_record.sample.jsonl
-python3 tools/ontology/test_operation_audit.py       # 自测 4 项
+python3 -m pytest tests/test_operation_audit.py       # 自测 4 项
 ```
 
 ## 审计范围与边界

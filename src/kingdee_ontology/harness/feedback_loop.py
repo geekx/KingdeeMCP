@@ -311,7 +311,7 @@ class FeedbackLoop:
     def check_violations(self) -> list[dict]:
         """检查当前链路的违规情况（RULE-001/002/003 自动检查）"""
         # 导入延迟避免循环依赖
-        from harness.rules import validate_operation_chain, OpNode
+        from kingdee_ontology.harness.rules import validate_operation_chain, OpNode
 
         nodes = []
         for i, node_data in enumerate(self.nodes):

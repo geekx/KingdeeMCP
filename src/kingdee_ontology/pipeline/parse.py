@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-from pipeline.lineage import Lineage, Origin
+from kingdee_ontology.pipeline.lineage import Lineage, Origin
 
 # 金蝶 ExecuteBillQuery 返回的是位置数组，字段名要靠请求时的 FieldKeys 对位。
 # 位数对不上就是真的对不上——宁可报错，也不要错位赋值：

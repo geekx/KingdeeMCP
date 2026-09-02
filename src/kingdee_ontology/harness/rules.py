@@ -21,7 +21,7 @@ Harness 约束层 - 操作链完整性规则
 from dataclasses import dataclass, field
 from typing import Optional
 
-from harness.tools import (
+from kingdee_ontology.harness.tools import (
     COMPOSITE_TOOLS, NEXT_ACTION_VOCAB, TERMINAL_VERBS,
     is_write, parse_next_action, verbs_of,
 )

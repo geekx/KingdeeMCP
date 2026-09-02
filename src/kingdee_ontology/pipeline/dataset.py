@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from pipeline.lineage import Lineage
+from kingdee_ontology.pipeline.lineage import Lineage
 
 
 @dataclass

@@ -1968,7 +1968,7 @@ def _check_push_link(source_form: str, target_form: str) -> dict:
         root = _Path(__file__).resolve().parents[2]
         if str(root) not in _sys.path:
             _sys.path.insert(0, str(root))
-        from base.ontology import load as _load
+        from kingdee_ontology.base.ontology import load as _load
         onto = _load(tenant=os.environ.get("KINGDEE_TENANT", ""))
     except Exception:
         return {"status": "skipped", "reason": "底座链接表不可用"}
@@ -3963,7 +3963,7 @@ def _record_halt(out: dict, form_id: str, produced: list[str] | None = None) -> 
         import sys as _sys
         from pathlib import Path as _Path
         _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "tools" / "ontology"))
-        from operation_audit import audit_recorder
+        from kingdee_ontology.operation_audit import audit_recorder
 
         _STATE_AFTER = {"save": "Z:暂存", "push": "Z:暂存",
                         "submit": "B:审核中", "audit": "C:已审核"}

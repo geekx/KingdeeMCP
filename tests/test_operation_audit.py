@@ -1,10 +1,7 @@
 """operation_audit 自测：验证 trace 串联、悬挂链检测、写失败不静默。"""
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from operation_audit import AuditRecorder, dangling_traces, load  # noqa: E402
+from kingdee_ontology.operation_audit import AuditRecorder, dangling_traces, load  # noqa: E402
 
 
 def test_trace_links_composite_steps(tmp_path):

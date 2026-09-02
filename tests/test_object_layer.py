@@ -13,10 +13,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.dispatch import Dispatcher            # noqa: E402
-from base.objects import ObjectModel            # noqa: E402
-from base.ontology import OntologyError, load   # noqa: E402
-from base.transport import FakeTransport        # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher            # noqa: E402
+from kingdee_ontology.base.objects import ObjectModel            # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load   # noqa: E402
+from kingdee_ontology.base.transport import FakeTransport        # noqa: E402
 
 
 @pytest.fixture
@@ -213,6 +213,7 @@ class TestProbingNavigation:
         d = self._d([[{"FBillNo": "RKD001"}]], tmp_path, monkeypatch)
         asyncio.run(d.navigate("采购订单", "采购入库单", "CGDD000231"))
         import json
+        # 这是运行期相对 cwd 写出的知识库，不是包内文件——包搬家不影响它
         kb = tmp_path / "wikiskill" / "knowledge.json"
         assert kb.exists(), "试出来的答案应该沉淀，否则下次还要再试一遍"
         e = json.loads(kb.read_text(encoding="utf-8"))["entries"][0]

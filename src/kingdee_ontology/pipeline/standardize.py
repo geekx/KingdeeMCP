@@ -18,7 +18,7 @@ import re
 from datetime import date, datetime
 from typing import Any, Optional
 
-from pipeline.lineage import Lineage, Origin
+from kingdee_ontology.pipeline.lineage import Lineage, Origin
 
 # 同一语义、不同账套的字段名。key 是规范名，值是见过的写法。
 # 依据：base/registry.yml 里 13 处 legacy_fields 分歧（审计 F-1）。

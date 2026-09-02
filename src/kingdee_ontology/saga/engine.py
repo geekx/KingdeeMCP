@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
-from saga.model import (RunState, RunStore, SagaRun, StepKind, StepResult,
+from kingdee_ontology.saga.model import (RunState, RunStore, SagaRun, StepKind, StepResult,
                         StepSpec, _now)
 
 # 检查步骤的条件表达式：字段 运算符 值。刻意只支持这几种——

@@ -1,7 +1,7 @@
 # 过程操作审计记录规范（Operation Audit Record）
 
 > 对应审计发现 **P-1 ~ P-5**。参考实现：[`tools/ontology/operation_audit.py`](../../tools/ontology/operation_audit.py)
-> · 自测：`python3 tools/ontology/test_operation_audit.py` · 样本：[`samples/operation_audit_record.sample.jsonl`](samples/operation_audit_record.sample.jsonl)
+> · 自测：`python3 -m pytest tests/test_operation_audit.py` · 样本：[`samples/operation_audit_record.sample.jsonl`](samples/operation_audit_record.sample.jsonl)
 
 ## 1. 为什么现有日志不够
 

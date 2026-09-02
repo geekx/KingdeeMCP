@@ -117,7 +117,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv[1:])
 
-    from base.ontology import load
+    from kingdee_ontology.base.ontology import load
     load.cache_clear()
     nouns = set(load(tenant="").nouns)
 

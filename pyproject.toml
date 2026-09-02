@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kingdee-mcp"
-version = "0.2.1"
-description = "MCP Server for Kingdee Cloud K/3 - Works with any MCP-compatible AI client"
+version = "0.3.0"
+description = "金蝶云星空本体底座 + MCP 服务端：五元本体、判断层、Saga 编排，可独立运行"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -27,14 +27,20 @@ dependencies = [
     "mcp[cli]>=1.2.0,<2.0.0",  # 2.0.0 删除了 mcp.server.fastmcp(FastMCP)，见 #12
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
-    "pyodbc>=5.0.0",
+    "PyYAML>=6.0",             # 本体注册表与租户配置
 ]
 
 [project.optional-dependencies]
+# pyodbc 只被 4 个可选的 SQL Server 目录探查工具用到，且是全链路里**唯一**
+# 需要现场编译（依赖 unixODBC 头文件）的依赖。把它留在必装项里，等于让
+# 每一次 `uvx`/`pip install` 都可能卡在编译或直接失败，而绝大多数用户
+# 根本用不到它。导入处早已是惰性的并带安装提示，移出去不影响任何现有调用。
+sql = ["pyodbc>=5.0.0"]
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
 ]
+all = ["kingdee-mcp[sql]"]
 
 [project.urls]
 Homepage = "https://github.com/WaHaiLong/KingdeeMCP"
@@ -42,14 +48,28 @@ Repository = "https://github.com/WaHaiLong/KingdeeMCP"
 Documentation = "https://github.com/WaHaiLong/KingdeeMCP#readme"
 
 [project.scripts]
-kingdee-mcp = "kingdee_mcp.server:main"
+kingdee-mcp = "kingdee_mcp.server:main"          # 原 97 工具 MCP 服务端
+kingdee-ontology = "kingdee_ontology.base.server:main"   # 底座 MCP 服务端（11 工具）
+kd-logic = "kingdee_ontology.cli:main"           # 判断层，按需独立运行、不需要模型
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kingdee_mcp"]
+# kingdee_ontology 此前**根本没被打包**：base/ aip/ saga/ 等都是仓库根目录下的
+# 顶层目录，`pip install` 装不到。同时它们也不能以 base/ pipeline/ 这种名字
+# 上 PyPI——那会和别的包撞名。故收进 kingdee_ontology 命名空间。
+packages = ["src/kingdee_mcp", "src/kingdee_ontology"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# 本体注册表是数据不是代码，但服务端没它跑不起来，必须进 wheel。
+"src/kingdee_ontology/base/registry.yml" = "kingdee_ontology/base/registry.yml"
+# 示例租户配置一并带上，装完就有东西可看；真实租户配置由 KINGDEE_PROFILES
+# 或当前目录的 profiles/ 提供——site-packages 是只读的，升级即被覆盖。
+"profiles/example-tenant/profile.yml" = "kingdee_ontology/profiles/example-tenant/profile.yml"
+"profiles/README.md" = "kingdee_ontology/profiles/README.md"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
+    "slow: 造 wheel、建 venv、真装真跑的打包实测（分钟级）",
     "e2e: 真实金蝶环境的端到端测试（需 KINGDEE_* 环境变量）",
 ]

@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pipeline.dataset import Dataset, Provenance
-from pipeline.lineage import Lineage, Origin
-from pipeline.parse import (FieldCountMismatch, flatten_view, is_business_error,
+from kingdee_ontology.pipeline.dataset import Dataset, Provenance
+from kingdee_ontology.pipeline.lineage import Lineage, Origin
+from kingdee_ontology.pipeline.parse import (FieldCountMismatch, flatten_view, is_business_error,
                             rows_from_query)
-from pipeline.standardize import Standardizer
+from kingdee_ontology.pipeline.standardize import Standardizer
 
 
 class PipelineError(RuntimeError):

@@ -161,7 +161,7 @@ class TestComposerDropdowns:
         他会以为是配置系统坏了。
         """
         sys.path.insert(0, str(ROOT))
-        from base.ontology import load as _load
+        from kingdee_ontology.base.ontology import load as _load
         _load.cache_clear()
         o = _load(tenant="example-tenant")
         verb, offered = ui["verb"], ui["objects_for_verb"]
@@ -215,8 +215,8 @@ class TestGraphAndFormCoexist:
         doc = _yaml.safe_load(ui["yaml"])
         assert "operations" in doc and doc["operations"]
         sys.path.insert(0, str(ROOT))
-        from base import ontology as ont
-        import base.validate_profile as vp
+        from kingdee_ontology.base import ontology as ont
+        import kingdee_ontology.base.validate_profile as vp
         prof = {"tenant": "_ui", **doc}
         monkeypatch.setattr(ont, "load_profile", lambda t: prof if t == "_ui" else None)
         monkeypatch.setattr(vp, "load_profile", lambda t: prof if t == "_ui" else None)

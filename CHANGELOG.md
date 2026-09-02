@@ -4,7 +4,62 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 当前 PyPI 版本：`0.2.1`（见 `pyproject.toml`）。本文件按功能里程碑汇总，未单独打 git tag。
+> 当前 PyPI 版本：`0.3.0`（见 `pyproject.toml`）。本文件按功能里程碑汇总，未单独打 git tag。
+
+---
+
+## [0.3.0]
+
+### 新增：AIP Logic 判断层（`aip/`）
+
+「这一步能不能做」此前有四种答法，各长在一处（`check_*` 抛异常、
+`availability()` 返回 dict、`validate_profile` 追加 errs/warns、saga 守卫
+又一套）。四份实现回答同一个问题，于是可以彼此矛盾而没人发现。
+
+现收拢成声明式、以本体为参数的纯函数：
+
+- **一次给全部理由，不短路**——三个前置条件本来是三个来回，现在是一个。
+- **「不知道」不等于「可以」**——`Decision.undetermined` 与 `allowed` 分开，
+  事实不全时 `allowed` 为 `False`。旧 `availability()` 在状态未知时返回
+  `enabled: True`，只读该字段的调用方会直接走下去。
+- **纯函数**，不发请求、不读文件、不看时钟，故可独立运行。
+
+新增规则 AIP-04（不可逆需人工确认）、AIP-05（二开单操作编码），
+经 `Dispatcher.act` 的 `advisories` 交出。不新增 MCP 工具：
+`kd_describe(what='logic')`。
+
+### 新增：`kd-logic`，判断层可脱离模型独立运行
+
+冷启动约 130 ms，零 token。退出码 0/1/2/3 可直接用于脚本编排。
+`kd-logic serve` 可挂成本地 HTTP 端点（仅监听回环——判断层不做鉴权）。
+
+### 破坏性变更：包结构
+
+`base/` `aip/` `saga/` `pipeline/` `indexlayer/` `harness/` `wikiskill/`
+由仓库顶层目录收进 `src/kingdee_ontology/` 命名空间。
+
+**原因**：这些包此前**根本没被打进 wheel**（`packages` 只列了
+`src/kingdee_mcp`），`pip install` 装不到；而且 `base`、`pipeline` 这类
+名字也不能就这么上 PyPI，会和别的包撞名。
+
+- `from base.ontology import …` → `from kingdee_ontology.base.ontology import …`
+- `python -m base.server` → `python -m kingdee_ontology.base.server`
+  （或直接用新入口 `kingdee-ontology`）
+- `operation_audit` 由 `tools/ontology/` 移入包内——它被 `Dispatcher` 直接
+  导入，是运行期代码，此前只靠 conftest 补 `sys.path` 才导得到。
+
+### 变更：`pyodbc` 移出必装项
+
+只被 4 个可选的 SQL Server 目录探查工具用到，却是全链路里唯一需要现场
+编译的依赖。改为 `pip install kingdee-mcp[sql]`。导入处早已惰性并带安装
+提示，不影响任何现有调用。
+
+### 新增：打包保护（`tests/test_packaging.py`）
+
+打包缺陷对普通测试是隐形的——conftest 补了 `sys.path`，于是「只在源码树
+里导得到」的模块照样过测试，装成 wheel 才 `ModuleNotFoundError`。
+现分两层守：静态检查（导入来源、`sys.path` 补丁、判断层依赖闭包）+
+真建 wheel 真装进干净 venv 真跑。两层都进了 CI。
 
 ---
 

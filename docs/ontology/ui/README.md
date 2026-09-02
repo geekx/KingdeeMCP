@@ -31,7 +31,7 @@ C 已审核 / D 重新审核`，加上 `CLOSED / VOID / DELETED`）。点任一�
 
 **业务操作编排** — 用你自己的说法给一件事命名，拼出步骤，导出 YAML 贴进
 `profiles/<租户>/profile.yml` 的 `operations` 段。之后直接说「帮我做销售开票」就能用。
-导出的 YAML 直接可过 `python3 -m base.validate_profile`，不需要再改格式。
+导出的 YAML 直接可过 `python3 -m kingdee_ontology.base.validate_profile`，不需要再改格式。
 
 ## 重新生成
 

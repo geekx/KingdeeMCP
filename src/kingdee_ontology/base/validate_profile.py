@@ -1,6 +1,6 @@
 """租户配置校验 —— 用中文告诉业务人员哪里填错了、该怎么改。
 
-    python3 -m base.validate_profile <租户名>
+    python3 -m kingdee_ontology.base.validate_profile <租户名>
 
 设计原则：报错必须可执行。只说"格式错误"没有意义，要说清楚
 「第几个操作的第几步、错在哪个字段、正确写法是什么」。
@@ -8,11 +8,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from base.ontology import OntologyError, load, load_profile  # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load, load_profile  # noqa: E402
 
 STEP_VERBS = {"submit", "audit", "unaudit", "delete", "close", "unclose",
               "void", "cancel", "forbid", "enable", "save"}
@@ -67,7 +64,7 @@ def _check_steps(op_key: str, steps: list, o, errs: list, warns: list) -> None:
                 o.check_verb_applies("query", st["对象"])
             except OntologyError as e:
                 errs.append(f"{where}：{e}")
-            from saga.engine import SagaError, eval_condition
+            from kingdee_ontology.saga.engine import SagaError, eval_condition
             try:
                 eval_condition(st["条件"], [])
             except SagaError as e:
@@ -158,7 +155,7 @@ def validate(tenant: str) -> tuple[list[str], list[str]]:
         # 而重抄正是第二个事实来源的来源。
         # 判断本身在判断层（AIP-06），这里只负责报告：同一个问题两处各写一遍
         # 逻辑，迟早在"继承来的补偿算不算数"这种细节上分叉。
-        from aip.logic import Facts, evaluate
+        from kingdee_ontology.aip.logic import Facts, evaluate
         no_comp = []
         for i, st in enumerate(steps):
             if not isinstance(st, dict):
@@ -183,7 +180,7 @@ def validate(tenant: str) -> tuple[list[str], list[str]]:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("用法：python3 -m base.validate_profile <租户名>")
+        print("用法：python3 -m kingdee_ontology.base.validate_profile <租户名>")
         return 2
     tenant = argv[1]
     try:

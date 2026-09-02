@@ -1005,51 +1005,51 @@ rules:
   - id: PRE-01
     kind: precondition
     zh: 动词必须在名词的 allowed_verbs 内
-    enforced_by: base.ontology.check_verb_applies
-    decided_by: aip.logic.verb_applies
+    enforced_by: kingdee_ontology.base.ontology.check_verb_applies
+    decided_by: kingdee_ontology.aip.logic.verb_applies
   - id: PRE-02
     kind: precondition
     zh: 下推的 (from,to) 必须是已登记的链接
-    enforced_by: base.ontology.check_link
-    decided_by: aip.logic.link_registered
+    enforced_by: kingdee_ontology.base.ontology.check_link
+    decided_by: kingdee_ontology.aip.logic.link_registered
   - id: SAGA-01
     kind: precondition
     zh: 写步骤之前必须先过守卫（有『检查』步骤时）
-    enforced_by: saga.engine.SagaEngine.advance
+    enforced_by: kingdee_ontology.saga.engine.SagaEngine.advance
     note: 没有守卫的顺序执行只是盲发，失败时才发现前提早就不成立
   - id: SAGA-02
     kind: precondition
     zh: 标了『授权』的子任务必须逐步取得记名授权，整体确认一次不覆盖它
-    enforced_by: saga.engine.SagaEngine.authorize
+    enforced_by: kingdee_ontology.saga.engine.SagaEngine.authorize
     note: 「生成开票申请」和「过账应收」的风险不同，凭什么一次确认覆盖两者
   - id: SAGA-03
     kind: postcondition
     zh: 任一步失败时，已生效的写步骤按逆序补偿；补偿动作不得靠推断
-    enforced_by: saga.engine.SagaEngine.compensate
-    decided_by: aip.logic.step_compensable
+    enforced_by: kingdee_ontology.saga.engine.SagaEngine.compensate
+    decided_by: kingdee_ontology.aip.logic.step_compensable
     note: >
       补偿默认取动词的 compensation 字段；profile 可覆盖但不得与本体矛盾。
       没有 compensation 的动词（delete/void）失败后只报告遗留，不猜怎么收拾。
   - id: PRE-03
     kind: precondition
     zh: 动词的 requires_state 必须被满足（需先读取当前状态）
-    enforced_by: base.ontology.check_state
-    decided_by: aip.logic.state_satisfied
+    enforced_by: kingdee_ontology.base.ontology.check_state
+    decided_by: kingdee_ontology.aip.logic.state_satisfied
     note: 未提供 current_state 时降级为警告，不阻断——避免为校验而强制多一次查询。
   # ── 判断层自有的规则：不是前置拦截，是「做之前该知道的事」 ──
   - id: AIP-04
     kind: advisory
     zh: 没有逆动词的写动作，执行前必须有人点头
-    enforced_by: base.dispatch.Dispatcher.act
-    decided_by: aip.logic.irreversible
+    enforced_by: kingdee_ontology.base.dispatch.Dispatcher.act
+    decided_by: kingdee_ontology.aip.logic.irreversible
     note: >
       inverse 与 compensation 是两回事：push 没有逆动词（不存在 unpush），
       但产物可以 delete 掉。这条只看**这个对象本身**能不能退回去。
   - id: AIP-05
     kind: advisory
     zh: 走金蝶「操作」接口的动词，二开单常需显式操作编码
-    enforced_by: base.dispatch.Dispatcher.act
-    decided_by: aip.logic.needs_operation_code
+    enforced_by: kingdee_ontology.base.dispatch.Dispatcher.act
+    decided_by: kingdee_ontology.aip.logic.needs_operation_code
     note: >
       不阻断——多数标准单用默认值能过。但这是二开环境里最常见的一类
       「参数都对却报错」，事前一句提醒远好过事后翻日志。

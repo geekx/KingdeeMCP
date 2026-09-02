@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from aip.decide import BLOCK, INFO, WARN, Decision, Reason, merge
+from kingdee_ontology.aip.decide import BLOCK, INFO, WARN, Decision, Reason, merge
 
 # 这几个动词随表单而异：金蝶把它们做成"操作"而非独立接口，二开单常需显式
 # 指定操作编码。原来这张表埋在 objects.py 里，只在渲染卡片时用得到，

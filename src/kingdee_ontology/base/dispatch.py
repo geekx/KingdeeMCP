@@ -7,21 +7,17 @@
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
-
-from base.objects import ObjectModel                            # noqa: E402
-from indexlayer.store import ObjectIndex                        # noqa: E402
-from pipeline.run import Pipeline                               # noqa: E402
-from saga.engine import SagaEngine                              # noqa: E402
-from saga.executor import make_executor                         # noqa: E402
-from saga.model import RunStore, SagaRun                        # noqa: E402
-from base.ontology import Ontology, OntologyError, load        # noqa: E402
-from base.transport import KingdeeTransport, Transport         # noqa: E402
-from operation_audit import audit_recorder                     # noqa: E402
+from kingdee_ontology.base.objects import ObjectModel                            # noqa: E402
+from kingdee_ontology.indexlayer.store import ObjectIndex                        # noqa: E402
+from kingdee_ontology.pipeline.run import Pipeline                               # noqa: E402
+from kingdee_ontology.saga.engine import SagaEngine                              # noqa: E402
+from kingdee_ontology.saga.executor import make_executor                         # noqa: E402
+from kingdee_ontology.saga.model import RunStore, SagaRun                        # noqa: E402
+from kingdee_ontology.base.ontology import Ontology, OntologyError, load        # noqa: E402
+from kingdee_ontology.base.transport import KingdeeTransport, Transport         # noqa: E402
+from kingdee_ontology.operation_audit import audit_recorder                     # noqa: E402
 
 # ExecuteOperation 的操作编码。随表单而异时由调用方显式传 operation 覆盖。
 _OP_NUMBER = {"void": "Cancel", "close": "BillClose", "unclose": "UnBillClose",
@@ -470,10 +466,7 @@ class Dispatcher:
     def _propose_link_filter(self, src: str, dst: str, flt: str, link: dict) -> None:
         """把探测出来的关联字段提给知识库。只提议，不自动改配置。"""
         try:
-            import sys as _sys
-            from pathlib import Path as _P
-            _sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
-            from wikiskill.knowledge import Entry, Knowledge
+            from kingdee_ontology.wikiskill.knowledge import Entry, Knowledge
             import hashlib
             s = self.o.resolve_noun(src).form_id
             t = self.o.resolve_noun(dst).form_id

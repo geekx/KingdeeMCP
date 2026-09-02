@@ -2,8 +2,8 @@
 
 只回答「按本体，这样做成不成立」，不执行任何动作、不发任何请求。
 """
-from aip.decide import ALLOW, BLOCK, INFO, WARN, Decision, Reason, merge
-from aip.logic import (
+from kingdee_ontology.aip.decide import ALLOW, BLOCK, INFO, WARN, Decision, Reason, merge
+from kingdee_ontology.aip.logic import (
     NEEDS_OPERATION_CODE, REGISTRY, Facts, LogicFn, can, describe, evaluate, logic,
 )
 

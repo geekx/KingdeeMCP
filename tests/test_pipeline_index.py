@@ -12,12 +12,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.ontology import load                                   # noqa: E402
-from indexlayer.store import ObjectIndex                         # noqa: E402
-from pipeline.lineage import Origin                              # noqa: E402
-from pipeline.parse import FieldCountMismatch, rows_from_query   # noqa: E402
-from pipeline.run import Pipeline, PipelineError                 # noqa: E402
-from pipeline.standardize import Standardizer                    # noqa: E402
+from kingdee_ontology.base.ontology import load                                   # noqa: E402
+from kingdee_ontology.indexlayer.store import ObjectIndex                         # noqa: E402
+from kingdee_ontology.pipeline.lineage import Origin                              # noqa: E402
+from kingdee_ontology.pipeline.parse import FieldCountMismatch, rows_from_query   # noqa: E402
+from kingdee_ontology.pipeline.run import Pipeline, PipelineError                 # noqa: E402
+from kingdee_ontology.pipeline.standardize import Standardizer                    # noqa: E402
 
 
 @pytest.fixture

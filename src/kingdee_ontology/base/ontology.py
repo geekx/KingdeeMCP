@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import functools
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -19,6 +20,31 @@ from typing import Any, Optional
 import yaml
 
 REGISTRY_PATH = Path(__file__).with_name("registry.yml")
+
+
+def profile_roots() -> list[Path]:
+    """去哪儿找租户配置，按优先级。
+
+    装进 site-packages 之后，包目录是只读的、升级即被覆盖——租户配置绝不能
+    只住在那里。所以先看环境变量，再看当前目录，最后才是包内自带的示例。
+    """
+    roots: list[Path] = []
+    env = os.environ.get("KINGDEE_PROFILES")
+    if env:
+        roots += [Path(x).expanduser() for x in env.split(os.pathsep) if x.strip()]
+    roots.append(Path.cwd() / "profiles")
+    roots.append(Path(__file__).resolve().parents[1] / "profiles")   # 包内示例
+    roots.append(Path(__file__).resolve().parents[3] / "profiles")   # 源码树
+    return roots
+
+
+def _profile_path(tenant: str) -> Path:
+    for r in profile_roots():
+        c = r / tenant / "profile.yml"
+        if c.is_file():
+            return c
+    # 一个不存在的路径交回去，由调用方按既有逻辑报"没有这个租户"
+    return profile_roots()[-2] / tenant / "profile.yml"
 
 
 class OntologyError(ValueError):
@@ -154,12 +180,12 @@ class Ontology:
     def decide(self, verb: str, noun_ref: str, state: Optional[str] = None,
                target: Optional[str] = None, params: Optional[dict] = None):
         """完整结论：一次给出全部理由，不在第一个问题上短路。"""
-        from aip.logic import can
+        from kingdee_ontology.aip.logic import can
         return can(self, verb, noun_ref, state=state, target=target, params=params)
 
     def check_verb_applies(self, verb: str, noun_ref: str) -> tuple[Verb, Noun]:
         """PRE-01：动词必须在名词的 allowed_verbs 内。"""
-        from aip.logic import Facts, evaluate
+        from kingdee_ontology.aip.logic import Facts, evaluate
         v, n = self.verb(verb), self.resolve_noun(noun_ref)
         d = evaluate(Facts(ontology=self, verb=v.name, noun=n.form_id), only=["AIP-01"])
         if d.blocks:
@@ -168,7 +194,7 @@ class Ontology:
 
     def check_link(self, source_ref: str, target_ref: str) -> dict:
         """PRE-02：下推的 (from,to) 必须已登记。"""
-        from aip.logic import Facts, evaluate
+        from kingdee_ontology.aip.logic import Facts, evaluate
         s, t = self.resolve_noun(source_ref), self.resolve_noun(target_ref)
         d = evaluate(Facts(ontology=self, noun=s.form_id, target=t.form_id),
                      only=["AIP-02"])
@@ -183,7 +209,7 @@ class Ontology:
         判断层把「不知道」记为 undetermined；这个入口按既有约定把它降级成
         一句警告返回，而不是拦下。想要严格语义的调用方请用 decide()。
         """
-        from aip.logic import Facts, evaluate
+        from kingdee_ontology.aip.logic import Facts, evaluate
         d = evaluate(Facts(ontology=self, verb=self.verb(verb).name,
                            state=current_state), only=["AIP-03"])
         if d.blocks:
@@ -237,7 +263,7 @@ class Ontology:
             # 判断层的自我说明：有哪些逻辑函数、各自执行哪条规则、需要哪些事实。
             # key 形如 "audit@SAL_SaleOrder" 或 "audit@SAL_SaleOrder@C" 时直接判一次，
             # 省得调用方为了知道"能不能做"先拉一遍全量本体自己推。
-            from aip.logic import describe as _logic_describe
+            from kingdee_ontology.aip.logic import describe as _logic_describe
             if not key:
                 return {"note": "判断层：纯函数，不发请求。key='动词@名词[@当前状态]' 可直接判一次。",
                         "functions": _logic_describe()}
@@ -319,7 +345,7 @@ def load_profile(tenant: Optional[str]) -> Optional[dict]:
     """按租户名加载 profiles/<tenant>/profile.yml；未指定或不存在返回 None。"""
     if not tenant:
         return None
-    p = Path(__file__).resolve().parents[1] / "profiles" / tenant / "profile.yml"
+    p = _profile_path(tenant)
     if not p.exists():
         raise OntologyError(
             f"找不到租户配置 {p}。"

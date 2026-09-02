@@ -75,7 +75,7 @@ def main(argv: list[str]) -> int:
         from kingdee_mcp.server import mcp as legacy
         out["legacy"] = asyncio.run(_surface(legacy))
     if args.base or args.both:
-        from base.server import mcp as base_mcp
+        from kingdee_ontology.base.server import mcp as base_mcp
         out["base"] = asyncio.run(_surface(base_mcp))
 
     if args.json:

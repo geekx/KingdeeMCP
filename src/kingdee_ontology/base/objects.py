@@ -18,9 +18,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from aip import Decision
-from aip.logic import NEEDS_OPERATION_CODE, can as aip_can
-from base.ontology import Noun, Ontology, OntologyError, Verb
+from kingdee_ontology.aip import Decision
+from kingdee_ontology.aip.logic import NEEDS_OPERATION_CODE, can as aip_can
+from kingdee_ontology.base.ontology import Noun, Ontology, OntologyError, Verb
 
 # 动词 → 参数 schema。UI 据此生成表单，Skill 据此知道要问用户什么。
 # type 取值：ids（单据标识列表）/ model（单据字段对象）/ enum / string / bool / noun_ref

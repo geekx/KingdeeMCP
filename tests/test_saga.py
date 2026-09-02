@@ -14,11 +14,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.dispatch import Dispatcher            # noqa: E402
-from base.ontology import OntologyError, load   # noqa: E402
-from base.transport import FakeTransport        # noqa: E402
-from saga.engine import SagaError, eval_condition, parse_steps  # noqa: E402
-from saga.model import RunState, RunStore, SagaRun              # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher            # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load   # noqa: E402
+from kingdee_ontology.base.transport import FakeTransport        # noqa: E402
+from kingdee_ontology.saga.engine import SagaError, eval_condition, parse_steps  # noqa: E402
+from kingdee_ontology.saga.model import RunState, RunStore, SagaRun              # noqa: E402
 
 OK = {"Result": {"ResponseStatus": {"IsSuccess": True}, "Id": "1", "Number": "N1"}}
 FAIL = {"Result": {"ResponseStatus": {"IsSuccess": False,
@@ -31,10 +31,10 @@ PUSH_OK = {"Result": {"ResponseStatus": {"IsSuccess": True},
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("KINGDEE_OPERATION_AUDIT_LOG", str(tmp_path / "a.jsonl"))
-    import operation_audit as oa
+    import kingdee_ontology.operation_audit as oa
     sys.path.insert(0, str(ROOT / "tools" / "ontology"))
     monkeypatch.setattr(oa, "audit_recorder", oa.AuditRecorder(tmp_path / "a.jsonl"))
-    import base.dispatch as bd
+    import kingdee_ontology.base.dispatch as bd
     monkeypatch.setattr(bd, "audit_recorder", oa.audit_recorder)
     load.cache_clear()
     yield
@@ -163,7 +163,7 @@ class TestCompensation:
         不许拿 inverse 顶替：inverse 退的是同一个对象的状态，
         compensation 清的是这一步的产物，两者不是一回事。
         """
-        import base.ontology as ont
+        import kingdee_ontology.base.ontology as ont
         prof = {"tenant": "_t", "operations": {"删了再说": {"zh": "删了再说", "steps": [
             {"做": "delete", "对象": "PUR_PurchaseOrder", "用": "targets"},
             {"做": "submit", "对象": "PUR_PurchaseOrder", "用": "targets"},
@@ -190,7 +190,7 @@ class TestCompensation:
 
     def test_profile_contradicting_the_ontology_is_rejected(self):
         """两处事实打架时不许静默采信任何一方。"""
-        import base.ontology as ont
+        import kingdee_ontology.base.ontology as ont
         prof = {"tenant": "_t3", "operations": {"打架": {"zh": "打架", "steps": [
             {"做": "audit", "对象": "PUR_PurchaseOrder", "用": "targets", "补偿": "delete"},
         ]}}}
@@ -238,7 +238,7 @@ class TestPlanIsSafe:
         assert len(gated) == 1 and gated[0]["authorize"] == "财务主管"
 
     def test_bad_compensation_verb_rejected_at_plan_time(self):
-        import base.ontology as ont
+        import kingdee_ontology.base.ontology as ont
         prof = {"tenant": "_t2", "operations": {"坏的": {"zh": "坏的", "steps": [
             {"做": "submit", "对象": "PUR_PurchaseOrder", "用": "targets", "补偿": "不存在的动词"},
         ]}}}
@@ -319,7 +319,7 @@ class TestRulesAreRegistered:
     def test_each_rule_names_who_enforces_it(self):
         for r in load(tenant="").rules:
             if r["id"].startswith("SAGA"):
-                assert r.get("enforced_by", "").startswith("saga."), \
+                assert ".saga." in r.get("enforced_by", ""), \
                     f"{r['id']} 没说清谁执行它"
 
 

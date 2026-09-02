@@ -15,9 +15,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from aip import BLOCK, INFO, WARN, Decision, Facts, Reason, can, evaluate  # noqa: E402
-from aip.logic import REGISTRY  # noqa: E402
-from base.ontology import OntologyError, load  # noqa: E402
+from kingdee_ontology.aip import BLOCK, INFO, WARN, Decision, Facts, Reason, can, evaluate  # noqa: E402
+from kingdee_ontology.aip.logic import REGISTRY  # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -168,7 +168,7 @@ class TestSingleSourceOfTruth:
         以后：一旦有人为了"多给几个按钮"放宽那层过滤，卡片就会开始展示
         执行时必被 PRE-01 拦下的动作，而没有别的测试会失败。
         """
-        from base.objects import ObjectModel
+        from kingdee_ontology.base.objects import ObjectModel
         m = ObjectModel(o)
         mismatch = []
         for form_id in list(o.nouns)[:40]:
@@ -184,8 +184,8 @@ class TestSingleSourceOfTruth:
 
     def test_needs_operation_code_table_has_one_home(self):
         """这张表原来埋在 objects.py 里，只在渲染卡片时用得到。"""
-        import base.objects as objects
-        from aip.logic import NEEDS_OPERATION_CODE
+        import kingdee_ontology.base.objects as objects
+        from kingdee_ontology.aip.logic import NEEDS_OPERATION_CODE
         assert objects._NEEDS_OPERATION is NEEDS_OPERATION_CODE
 
 
@@ -193,7 +193,7 @@ class TestPurity:
     """纯函数——这是"能做成毫秒级独立服务"的前提，不是洁癖。"""
 
     def test_no_io_imports_in_logic_layer(self):
-        src = (ROOT / "aip" / "logic.py").read_text(encoding="utf-8")
+        src = (ROOT / "src" / "kingdee_ontology" / "aip" / "logic.py").read_text(encoding="utf-8")
         for banned in ("import httpx", "import requests", "urllib", "open(",
                        "subprocess", "import os"):
             assert banned not in src, f"判断层不该碰 I/O，但出现了 {banned!r}"
@@ -205,8 +205,8 @@ class TestPurity:
 
     def test_logic_layer_does_not_import_base(self):
         """判断层不依赖 base，才能被单独打包、单独运行。"""
-        src = (ROOT / "aip" / "logic.py").read_text(encoding="utf-8")
-        assert "from base" not in src and "import base" not in src
+        src = (ROOT / "src" / "kingdee_ontology" / "aip" / "logic.py").read_text(encoding="utf-8")
+        assert "kingdee_ontology.base" not in src, "判断层不能依赖 base——它要能被单独打包运行"
 
 
 class TestTenantOverlay:

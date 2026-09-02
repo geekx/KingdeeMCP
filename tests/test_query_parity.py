@@ -19,9 +19,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.dispatch import Dispatcher     # noqa: E402
-from base.ontology import load           # noqa: E402
-from base.transport import FakeTransport  # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher     # noqa: E402
+from kingdee_ontology.base.ontology import load           # noqa: E402
+from kingdee_ontology.base.transport import FakeTransport  # noqa: E402
 
 SERVER = ROOT / "src" / "kingdee_mcp" / "server.py"
 
@@ -165,7 +165,7 @@ class TestKdQueryUsesRegistryDefaults:
 
     def test_view_nouns_reject_write_verbs(self, onto):
         """长尾里有大量查询视图（成本分析、日志），它们不该接受写动词。"""
-        from base.ontology import OntologyError
+        from kingdee_ontology.base.ontology import OntologyError
         for view in ("BOS_OperateLog", "STK_CostTrend", "PLAN_MRPResult"):
             with pytest.raises(OntologyError):
                 onto.check_verb_applies("audit", view)

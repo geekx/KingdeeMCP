@@ -148,7 +148,7 @@ operations:
 ```
 
 之后直接说「帮我做**销售开票**，订单 XSDD001」就能用。
-`python3 -m base.validate_profile <租户>` 用中文校验，错在哪一步、该怎么改都说清楚。
+`python3 -m kingdee_ontology.base.validate_profile <租户>` 用中文校验，错在哪一步、该怎么改都说清楚。
 填写指南见 [`profiles/README.md`](../../profiles/README.md)，是写给业务人员的，不是写给工程师的。
 
 ### 与原「一站式」复合工具的区别（修审计 A-1）
@@ -169,7 +169,7 @@ operations:
 
 ```
 kd_act / kd_push / kd_run  →  operation_audit.jsonl
-                                    ↓  python3 -m wikiskill.retro
+                                    ↓  python3 -m kingdee_ontology.wikiskill.retro
                           wikiskill/knowledge.json（累积证据、涨置信度）
                                     ↓  达到 medium 才浮上来
               改 base/registry.yml · profiles/<租户>/profile.yml · 代码
@@ -199,9 +199,9 @@ kd_act / kd_push / kd_run  →  operation_audit.jsonl
 自动改 ERP 的操作定义是危险的。机器只负责积累证据和给建议，落地要人点头：
 
 ```bash
-python3 -m wikiskill.retro                       # 每日回溯
-python3 -m wikiskill.retro --adopt <id>          # 采纳
-python3 -m wikiskill.retro --reject <id> --note "业务上就是这样"
+python3 -m kingdee_ontology.wikiskill.retro                       # 每日回溯
+python3 -m kingdee_ontology.wikiskill.retro --adopt <id>          # 采纳
+python3 -m kingdee_ontology.wikiskill.retro --reject <id> --note "业务上就是这样"
 ```
 
 **被 reject 的条目不会复活。** 计数继续累积，但不再刷屏 ——
@@ -462,7 +462,7 @@ kd_describe(what='logic', key='audit@销售订单@Z:暂存')   # 直接判一次
 底座与原 97 工具**并存**，不是替换：
 
 1. 原 `src/kingdee_mcp/server.py` 一行未删，现有集成不受影响；
-2. 新集成挂 `base/server.py`（`python3 -m base.server`），token 成本降 97%；
+2. 新集成挂 `base/server.py`（`python3 -m kingdee_ontology.base.server`），token 成本降 97%；
 3. 只读长尾已收敛 94%，剩余 4 个 SQL 探查工具仍走原路径（刻意保留，见 4.5）；
 4. WikiSkill 的回溯同时读两边的日志。
 
@@ -488,29 +488,96 @@ kd_describe(what='logic', key='audit@销售订单@Z:暂存')   # 直接判一次
 最后一条值得说明：README 里的数字是**实测生成**的，所以加了测试或改了注册表之后
 需要重跑 `update_readme.py` 再提交。这条失败不代表代码有问题，只代表 README 落后于代码。
 
-## 6. 目录
+## 6. 打包：判断层可以脱离模型独立跑
+
+一个 agent 要知道「这张单现在能不能审核」，此前的做法是把本体读进上下文，
+由模型推。那件事有三重成本——token、延迟，以及**它会推错**。
+判断是确定性的，不该由概率模型来做。
 
 ```
-base/                    MCP 底座
-  registry.yml           唯一事实来源：动词/名词/状态/链接/规则
-  ontology.py            本体 + 前置规则 + 租户覆盖层合并
-  dispatch.py            通用动词分发 + 业务操作执行
-  transport.py           传输抽象（可注入，便于独立测试）
-  server.py              7 个 MCP 工具
-  validate_profile.py    租户配置校验（中文报错）
+$ kd-logic can audit 销售订单 --state Z:暂存
+{"allowed": false, "why": "audit(审核) 要求对象处于 ['B:审核中'] 之一，当前为 'Z:暂存'。
+                           可先执行 submit 到达所需状态。"}
+```
+
+冷启动约 130 ms，零 token，答案每次都一样。退出码是给脚本用的
+（0 可以 / 1 不可以 / 2 事实不全判不了 / 3 用法错误），所以
+`kd-logic can … && 真去执行` 这种编排是成立的。
+
+反复判断时可以 `kd-logic serve` 挂成本地 HTTP 端点；**只监听回环地址**——
+判断层不做鉴权，不该被暴露到网络上。
+
+### 为此做的三件事
+
+**一、包终于真的被打进 wheel。** 此前 `base/` `saga/` `pipeline/` 都是仓库根目录
+下的顶层目录，`[tool.hatch.build.targets.wheel] packages` 只列了 `src/kingdee_mcp`
+——`pip install` 装不到它们。而且这些名字也不能就这么上 PyPI：一个叫
+`base` 或 `pipeline` 的顶层包会和别人的包撞名。现已收进
+`src/kingdee_ontology/` 命名空间。
+
+**二、`operation_audit` 从 `tools/` 搬进包里。** 它被 `Dispatcher` 直接导入，
+是运行期代码，却住在仓库工具目录，只靠 conftest 往 `sys.path` 里塞路径才导得到。
+
+**三、`pyodbc` 移出必装项。** 它只被 4 个可选的 SQL Server 目录探查工具用到，
+却是全链路里唯一需要现场编译（依赖 unixODBC 头文件）的依赖。留在必装项里
+等于让每次安装都可能卡住，而绝大多数用户根本用不到它。
+
+| 装什么 | 得到什么 |
+|---|---|
+| `pip install kingdee-mcp` | 本体 + 判断层 + Saga + 两个 MCP 服务端 |
+| `pip install kingdee-mcp[sql]` | 再加 SQL Server 目录探查 |
+
+判断层自身的传递依赖只有 **PyYAML**（`tests/test_packaging.py` 用静态检查守着
+这条：`aip` 与 `base.ontology` 的依赖闭包里不许出现 mcp / httpx / pyodbc）。
+
+### 这类缺陷对普通测试是隐形的
+
+`conftest.py` 往 `sys.path` 里塞了仓库根、`src/`、`tools/ontology/`，
+于是「只有在源码树里才导得到」的模块照样过测试，装成 wheel 之后才
+`ModuleNotFoundError`——2826 条测试全绿，产物却是坏的。
+`operation_audit` 当初就是这么漏的。
+
+所以打包保护分两层，都在 CI 里：
+
+| 检查 | 守住什么 |
+|---|---|
+| 静态：包内每个导入都必须来自标准库 / 已声明依赖 / 同一 wheel | 新增一个仓库内模块的导入 |
+| 静态：包内不许出现 `sys.path.insert` | 「只在源码树里能跑」的写法 |
+| 静态：判断层依赖闭包不含重依赖 | 独立运行的前提被悄悄破坏 |
+| 实测：真建 wheel、真装进干净 venv、在无关目录里真跑 | 以上都没覆盖到的 |
+
+租户配置**不进 wheel 的只读目录**。查找顺序：`$KINGDEE_PROFILES` →
+当前目录 `profiles/` → 包内示例。site-packages 是只读的、升级即被覆盖，
+真实租户配置住在那里迟早丢。
+
+## 7. 目录
+
+```
+src/kingdee_ontology/    ← 全部收在这个命名空间下，才能上 PyPI
+  base/
+    registry.yml         唯一事实来源：动词/名词/状态/链接/规则
+    ontology.py          本体 + 前置规则 + 租户覆盖层合并
+    objects.py           对象层：ObjectType / ActionType / ObjectCard
+    dispatch.py          通用动词分发 + 业务操作执行
+    transport.py         传输抽象（可注入，便于独立测试）
+    server.py            11 个 MCP 工具
+    validate_profile.py  租户配置校验（中文报错）
+  aip/                   第三层 判断：decide 结果类型 / logic 逻辑函数与注册表
+  saga/                  多扣扳机组：model 定义与持久化 / engine 引擎 /
+                         executor 接真实执行
+  pipeline/              第一层 数据加工：线 lineage / 解析 parse /
+                         标准 standardize / 表 dataset / 管道 run
+  indexlayer/            第二层 Funnel 索引：对象物化与检索（SQLite）
+  harness/               操作链约束（事后检查）
+  wikiskill/
+    knowledge.py         知识条目：累积、置信度、状态
+    retro.py             每日回溯与自优化
+  operation_audit.py     过程操作审计记录（运行期代码，故在包内）
+  cli.py                 kd-logic：判断层的独立入口
 profiles/
   README.md              面向业务人员的填写指南
   example-tenant/        示例：二开表单 + 自定义操作码 + 业务操作入口
 skill/kingdee-ontology/  Skill 实例层（渐进披露）
-wikiskill/
-  knowledge.py           知识条目：累积、置信度、状态
-  retro.py               每日回溯与自优化
-saga/                    多扣扳机组：model 定义与持久化 / engine 引擎 /
-                         executor 接真实执行
-pipeline/                第一层 数据加工：线 lineage / 解析 parse /
-                         标准 standardize / 表 dataset / 管道 run
-indexlayer/              第二层 Funnel 索引：对象物化与检索（SQLite）
-base/objects.py          对象层：ObjectType / ActionType / ObjectCard
 docs/ontology/ui/        界面形态（Ontology Explorer）
   _shell.html            模板（手改）
   ontology.json          本体导出（生成）

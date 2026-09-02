@@ -63,7 +63,7 @@ jobs:
       - name: 租户配置校验
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
-        run: python -m base.validate_profile example-tenant
+        run: python -m kingdee_ontology.base.validate_profile example-tenant
 
       - name: 本体实例可抽取（AST 静态分析，不连账套）
         env:
@@ -114,6 +114,16 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
-          python tools/ontology/test_operation_audit.py
-          python -m wikiskill.retro --report \
+          python -m pytest tests/test_operation_audit.py -q
+          python -m kingdee_ontology.wikiskill.retro --report \
             --audit docs/ontology/samples/operation_audit_record.sample.jsonl
+
+      # 打包产物必须真能装真能跑。这类缺陷对普通测试是隐形的：conftest 往
+      # sys.path 里塞了仓库路径，于是"只有在源码树里才导得到"的模块照样过测试，
+      # 装成 wheel 之后才 ModuleNotFoundError。所以必须真建真装真跑一遍。
+      - name: 打包产物可独立安装运行
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          pip install -q build
+          python -m pytest tests/test_packaging.py -q -m "slow or not slow"

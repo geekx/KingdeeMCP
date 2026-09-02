@@ -27,8 +27,8 @@ from extract_ontology import (  # noqa: E402
     ROOT, WRITE_VERBS, _load_tree, build,
 )
 
-RULES_PY = ROOT / "harness" / "rules.py"
-HARNESS_TOOLS_PY = ROOT / "harness" / "tools.py"
+RULES_PY = ROOT / "src" / "kingdee_ontology" / "harness" / "rules.py"
+HARNESS_TOOLS_PY = ROOT / "src" / "kingdee_ontology" / "harness" / "tools.py"
 SERVER_PY = ROOT / "src" / "kingdee_mcp" / "server.py"
 
 WRITE_ENDPOINTS = {"save", "submit", "audit", "unaudit", "delete",
@@ -258,7 +258,7 @@ def audit(model: dict) -> list[dict]:
                 f"{lk['source_form']} → {lk['target_form']}，未登记于 FORM_CATALOG 的是 {missing}。"))
     if model["links"]:
         hard = [f"{l['source_form']}→{l['target_form']}" for l in model["links"] if l["hardcoded"]]
-        registry = ROOT / "base" / "registry.yml"
+        registry = ROOT / "src" / "kingdee_ontology" / "base" / "registry.yml"
         if registry.exists():
             out.append(_finding(
                 "AT-07", "info", "legacy 路径的下推链接仍散落在函数体内",

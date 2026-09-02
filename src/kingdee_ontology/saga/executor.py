@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from saga.engine import SagaError, eval_condition
-from saga.model import StepKind, StepResult
+from kingdee_ontology.saga.engine import SagaError, eval_condition
+from kingdee_ontology.saga.model import StepKind, StepResult
 
 
 def make_executor(dispatcher, on_behalf_of: Optional[str] = None):

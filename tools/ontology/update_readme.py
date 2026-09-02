@@ -33,7 +33,7 @@ def _run(*args: str) -> str:
 
 
 def _collect() -> dict:
-    from base.ontology import load
+    from kingdee_ontology.base.ontology import load
 
     ver = re.search(r'^version = "([^"]+)"',
                     (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
@@ -107,9 +107,9 @@ def render(d: dict) -> str:
 python3 -m pytest tests/ -q                              # 全量测试
 python3 tools/ontology/audit_atomicity.py                # 操作原子化审计（可进 CI）
 python3 tools/ontology/measure_tool_surface.py --both    # token 账
-python3 -m base.validate_profile example-tenant          # 租户配置校验（中文报错）
-python3 -m wikiskill.retro --report                      # 每日回溯
-python3 -m base.server                                   # 启动底座（{d['base_tools']} 工具）
+python3 -m kingdee_ontology.base.validate_profile example-tenant          # 租户配置校验（中文报错）
+python3 -m kingdee_ontology.wikiskill.retro --report                      # 每日回溯
+python3 -m kingdee_ontology.base.server                                   # 启动底座（{d['base_tools']} 工具）
 ```
 
 ### 文档
@@ -159,9 +159,11 @@ def main(argv: list[str]) -> int:
         cur = s[s.index(BEGIN):s.index(END) + len(END)]
         # 时间戳与测试耗时每次都会变，比对时归一化掉——
         # 否则 --check 永远判过期，这层保护就没意义了。
+        # 耗时超过一分钟时 pytest 会多缀一个 " (0:01:00)"，也要一起吃掉：
+        # 漏了它，这层保护会在测试变慢的那天突然开始误报。
         def strip(x: str) -> str:
             x = re.sub(r"> \*\*更新于\*\*.*", "", x)
-            return re.sub(r" in [\d.]+s", "", x)
+            return re.sub(r" in [\d.]+s(?: \(\d+:\d{2}:\d{2}\))?", "", x)
         if strip(cur) == strip(block):
             print("✓ README 区块已是最新（除时间戳外无变化）")
             return 0

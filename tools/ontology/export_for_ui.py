@@ -14,8 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from base.objects import ObjectModel          # noqa: E402
-from base.ontology import load                # noqa: E402
+from kingdee_ontology.base.objects import ObjectModel          # noqa: E402
+from kingdee_ontology.base.ontology import load                # noqa: E402
 
 
 def build(tenant: str = "") -> dict:

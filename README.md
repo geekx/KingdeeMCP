@@ -7,9 +7,9 @@
 
 ## 本分支的增补：操作原子化审计 + Ontology 建模 + 三层架构
 
-> **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.2.1`
-> **更新于** 2026-09-02 22:34 UTC+08:00
-> **测试** 2822 passed, 401 skipped in 39.96s ｜ **原子性审计** 5 项发现 / 0 项 error
+> **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.3.0`
+> **更新于** 2026-09-02 22:57 UTC+08:00
+> **测试** 2832 passed, 401 skipped in 58.66s ｜ **原子性审计** 5 项发现 / 0 项 error
 >
 > 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
 
@@ -47,9 +47,9 @@
 python3 -m pytest tests/ -q                              # 全量测试
 python3 tools/ontology/audit_atomicity.py                # 操作原子化审计（可进 CI）
 python3 tools/ontology/measure_tool_surface.py --both    # token 账
-python3 -m base.validate_profile example-tenant          # 租户配置校验（中文报错）
-python3 -m wikiskill.retro --report                      # 每日回溯
-python3 -m base.server                                   # 启动底座（11 工具）
+python3 -m kingdee_ontology.base.validate_profile example-tenant          # 租户配置校验（中文报错）
+python3 -m kingdee_ontology.wikiskill.retro --report                      # 每日回溯
+python3 -m kingdee_ontology.base.server                                   # 启动底座（11 工具）
 ```
 
 ### 文档
