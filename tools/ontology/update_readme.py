@@ -69,7 +69,7 @@ def render(d: dict) -> str:
 
 > **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `{BASE_SHA}` ｜ **包版本** `v{d['version']}`
 > **更新于** {d['now']}
-> **测试** {d['tests']} ｜ **原子性审计** {d['findings']} 项发现 / {d['errors']} 项 error
+> **测试** {d['tests']}（本机实测）｜ **原子性审计** {d['findings']} 项发现 / {d['errors']} 项 error
 >
 > 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
 
@@ -157,13 +157,23 @@ def main(argv: list[str]) -> int:
 
     if BEGIN in s:
         cur = s[s.index(BEGIN):s.index(END) + len(END)]
-        # 时间戳与测试耗时每次都会变，比对时归一化掉——
-        # 否则 --check 永远判过期，这层保护就没意义了。
-        # 耗时超过一分钟时 pytest 会多缀一个 " (0:01:00)"，也要一起吃掉：
-        # 漏了它，这层保护会在测试变慢的那天突然开始误报。
+        # 比对前要归一化掉三样"随机器而变、不随代码而变"的东西。
+        # 这层门禁的用处是"改了代码却没重跑 README"，不是"两台机器结果不同"。
+        #
+        #   更新于     时间戳，每次都变。
+        #   耗时       超过一分钟时 pytest 还会多缀 " (0:01:00)"。
+        #   测试通过/跳过数
+        #              取决于本机装了哪些**可选**依赖：没装 playwright，
+        #              test_ui_composer 整个模块跳过；没装 build，打包实测跳过。
+        #              CI 里装 playwright 的步骤还排在全量测试之后，于是同一份
+        #              代码在 CI 与本地必然给出不同的通过数——拿它当门禁，
+        #              等于要求所有机器的可选依赖完全一致，这既做不到也没意义。
+        #              真正该守的是 token 账、名词数、审计发现数这些**由代码
+        #              决定**的数字，它们仍在比对范围内。
         def strip(x: str) -> str:
             x = re.sub(r"> \*\*更新于\*\*.*", "", x)
-            return re.sub(r" in [\d.]+s(?: \(\d+:\d{2}:\d{2}\))?", "", x)
+            x = re.sub(r" in [\d.]+s(?: \(\d+:\d{2}:\d{2}\))?", "", x)
+            return re.sub(r"> \*\*测试\*\*.*?｜", "> **测试** ｜", x)
         if strip(cur) == strip(block):
             print("✓ README 区块已是最新（除时间戳外无变化）")
             return 0
