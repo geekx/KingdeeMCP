@@ -1,0 +1,557 @@
+<title>金蝶对象台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F6F5F1; --card:#FFFFFF; --ink:#191C1B; --ink-2:#4A5250; --ink-3:#7C8481;
+  --rule:#DEDCD4; --rule-2:#EBE9E2;
+  --accent:#14675A; --accent-soft:#E4EEEA; --accent-ink:#0C4A40;
+  --seal:#A83A28; --seal-soft:#F6E7E3;
+  --amber:#8A6A1C; --amber-soft:#F5EEDC;
+  --shadow:0 1px 2px rgba(25,28,27,.06), 0 8px 24px -16px rgba(25,28,27,.28);
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --serif:"Noto Serif SC",Songti SC,SimSun,Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",
+         "Microsoft YaHei","Source Han Sans SC",sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#121514; --card:#191D1C; --ink:#E8EAE7; --ink-2:#A3ADAA; --ink-3:#77817E;
+    --rule:#2A302E; --rule-2:#222726;
+    --accent:#4FB8A3; --accent-soft:#16302B; --accent-ink:#8AD9C7;
+    --seal:#E08573; --seal-soft:#341F1B;
+    --amber:#D6B663; --amber-soft:#2E2718;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#121514; --card:#191D1C; --ink:#E8EAE7; --ink-2:#A3ADAA; --ink-3:#77817E;
+  --rule:#2A302E; --rule-2:#222726;
+  --accent:#4FB8A3; --accent-soft:#16302B; --accent-ink:#8AD9C7;
+  --seal:#E08573; --seal-soft:#341F1B;
+  --amber:#D6B663; --amber-soft:#2E2718;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+     font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;margin:0}
+code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ── 页头 ── */
+.top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+     padding:18px 24px 14px;border-bottom:1px solid var(--rule);background:var(--card)}
+.top h1{font-size:19px;letter-spacing:.01em}
+.sub{color:var(--ink-3);font-size:12.5px}
+.top .spacer{flex:1}
+.counts{display:flex;gap:14px;font-size:12px;color:var(--ink-2)}
+.counts b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+.note{margin:0;padding:9px 24px;background:var(--amber-soft);color:var(--amber);
+      font-size:12.5px;border-bottom:1px solid var(--rule)}
+.note b{font-weight:600}
+
+/* ── 标签页 ── */
+.tabs{display:flex;gap:2px;padding:0 24px;border-bottom:1px solid var(--rule);
+      background:var(--card)}
+.tab{padding:9px 14px;font-size:13px;color:var(--ink-2);border-bottom:2px solid transparent;
+     margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--accent-ink);border-bottom-color:var(--accent);font-weight:600}
+
+/* ── 三栏 ── */
+.panes{display:grid;grid-template-columns:246px minmax(0,1fr) 330px;
+       gap:1px;background:var(--rule);min-height:calc(100vh - 150px)}
+.pane{background:var(--paper);padding:16px;overflow:auto}
+@media (max-width:1080px){.panes{grid-template-columns:1fr}}
+
+.eyebrow{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+         color:var(--ink-3);font-weight:600;margin-bottom:8px}
+.search{width:100%;padding:7px 10px;border:1px solid var(--rule);border-radius:5px;
+        background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:9px 0 12px}
+.chip{padding:3px 9px;font-size:11.5px;border:1px solid var(--rule);border-radius:20px;
+      color:var(--ink-2);background:var(--card)}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.typelist{display:flex;flex-direction:column;gap:1px}
+.tbtn{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:baseline;
+      padding:7px 9px;border-radius:5px;text-align:left;width:100%}
+.tbtn:hover{background:var(--rule-2)}
+.tbtn[aria-current="true"]{background:var(--accent-soft);color:var(--accent-ink)}
+.tbtn .zh{font-size:13px;grid-area:1/1}
+.tbtn .n{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+         grid-area:1/2;justify-self:end}
+.tbtn .fid{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+           grid-area:2/1/3/3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── 对象卡片 ── */
+.card{background:var(--card);border:1px solid var(--rule);border-radius:8px;
+      box-shadow:var(--shadow);padding:18px 20px;margin-bottom:14px}
+.card h2{font-size:17px}
+.cardhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.badge{font-size:11px;padding:2px 8px;border-radius:4px;background:var(--rule-2);
+       color:var(--ink-2);font-family:var(--mono)}
+.badge.cat{background:var(--accent-soft);color:var(--accent-ink)}
+
+/* 状态轨道：用金蝶自己的字母码做进度条 */
+.track{display:flex;align-items:stretch;gap:0;margin:16px 0 6px;
+       border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.stop{flex:1;padding:8px 6px;text-align:center;border-right:1px solid var(--rule);
+      background:var(--card);min-width:0}
+.stop:last-child{border-right:none}
+.stop:hover{background:var(--rule-2)}
+.stop .code{font-family:var(--mono);font-size:12px;font-weight:500;display:block}
+.stop .zh{font-size:10.5px;color:var(--ink-3);display:block}
+.stop[aria-pressed="true"]{background:var(--accent);color:#fff}
+.stop[aria-pressed="true"] .zh{color:rgba(255,255,255,.82)}
+.stop.terminal .code::after{content:"·终";font-size:9px;opacity:.6;margin-left:2px}
+.tracknote{font-size:11.5px;color:var(--ink-3);margin:0 0 4px}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0 18px}
+.prop{display:grid;grid-template-columns:1fr auto;gap:8px;padding:5px 0;
+      border-bottom:1px solid var(--rule-2);align-items:baseline}
+.prop .k{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);
+         overflow:hidden;text-overflow:ellipsis}
+.prop .t{font-size:10px;color:var(--ink-3)}
+
+.links{display:flex;flex-direction:column;gap:6px}
+.link{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--rule);
+      border-radius:6px;background:var(--card);width:100%;text-align:left}
+.link:hover{border-color:var(--accent)}
+.arrow{font-family:var(--mono);color:var(--ink-3);font-size:12px}
+.link .zh{flex:1;font-size:13px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.confirmed{background:var(--accent)} .dot.documented{background:var(--ink-3)}
+.dot.suspect{background:var(--amber)}
+
+/* ── 动作检查器 ── */
+.act{width:100%;text-align:left;border:1px solid var(--rule);border-radius:6px;
+     padding:9px 11px;background:var(--card);margin-bottom:6px;position:relative}
+.act:hover{border-color:var(--accent)}
+.act[aria-current="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.act.off{opacity:.62}
+.act .row1{display:flex;align-items:baseline;gap:7px}
+.act .v{font-family:var(--mono);font-size:12px;font-weight:500}
+.act .zh{font-size:12.5px;color:var(--ink-2)}
+.act .why{font-size:11.5px;color:var(--seal);margin-top:3px;line-height:1.45}
+.act .why.warn{color:var(--amber)}
+.act.destructive{border-left:3px solid var(--seal)}
+.mini{font-size:10px;padding:1px 5px;border-radius:3px;font-family:var(--mono)}
+.mini.d{background:var(--seal-soft);color:var(--seal)}
+.mini.a{background:var(--rule-2);color:var(--ink-2)}
+.form label{display:block;font-size:11.5px;color:var(--ink-2);margin:9px 0 3px}
+.form input,.form textarea,.form select{width:100%;padding:6px 8px;border:1px solid var(--rule);
+  border-radius:5px;background:var(--paper);color:var(--ink);font:inherit;font-size:12.5px}
+.form textarea{font-family:var(--mono);min-height:74px;resize:vertical}
+.hint{font-size:11px;color:var(--ink-3);margin-top:2px}
+pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radius:6px;
+  font-family:var(--mono);font-size:11.5px;overflow-x:auto;margin:12px 0 0;line-height:1.55}
+:root[data-theme="dark"] pre.call,
+:root:not([data-theme="light"]) pre.call{background:#0B0E0D;color:#CFD6D3}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) pre.call{background:var(--ink);color:var(--paper)}}
+.copy{margin-top:8px;padding:5px 11px;border:1px solid var(--rule);border-radius:5px;
+      font-size:12px;background:var(--card)}
+.copy:hover{border-color:var(--accent);color:var(--accent-ink)}
+
+/* ── 链路图 ── */
+.graphwrap{overflow-x:auto;background:var(--card);border:1px solid var(--rule);
+           border-radius:8px;padding:18px}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin:10px 0 0;flex-wrap:wrap}
+.legend span{display:flex;align-items:center;gap:6px}
+
+/* ── 编排 ── */
+.steps{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+.step{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;
+      padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:var(--card)}
+.step .idx{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.step .x{color:var(--seal);font-size:15px;line-height:1;padding:0 4px}
+.addbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.addbar select,.addbar input{padding:6px 8px;border:1px solid var(--rule);border-radius:5px;
+  background:var(--card);color:var(--ink);font:inherit;font-size:12.5px}
+.btn{padding:6px 13px;border:1px solid var(--accent);border-radius:5px;
+     background:var(--accent);color:#fff;font-size:12.5px}
+.btn.ghost{background:var(--card);color:var(--accent-ink)}
+.empty{color:var(--ink-3);font-size:12.5px;padding:14px 0}
+[hidden]{display:none!important}
+</style>
+
+<div class="top">
+  <h1>金蝶对象台</h1>
+  <span class="sub">Ontology Explorer · 以对象为中心的操作面</span>
+  <span class="spacer"></span>
+  <div class="counts" id="counts"></div>
+</div>
+<p class="note">
+  <b>本页操作的是本体定义，不连账套。</b>
+  状态轨道是<b>模拟</b>——点一个状态，看此刻哪些动作可用、不可用的为什么。
+  动作面板给出的是可复制的 <code>kd_act(…)</code> 调用，由你在 MCP 里执行。
+</p>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-view="obj">对象</button>
+  <button class="tab" role="tab" aria-selected="false" data-view="graph">链路图</button>
+  <button class="tab" role="tab" aria-selected="false" data-view="compose">业务操作编排</button>
+</div>
+
+<div id="view-obj">
+  <div class="panes">
+    <aside class="pane">
+      <div class="eyebrow">对象类型</div>
+      <input class="search" id="q" placeholder="搜索名称 / 编码 / 别名" autocomplete="off">
+      <div class="chips" id="cats"></div>
+      <div class="typelist" id="types"></div>
+    </aside>
+    <main class="pane" id="center"></main>
+    <aside class="pane" id="right"></aside>
+  </div>
+</div>
+
+<div id="view-graph" hidden style="padding:20px 24px">
+  <div class="eyebrow">下推链路</div>
+  <div class="graphwrap" id="graph"></div>
+  <div class="legend">
+    <span><i class="dot confirmed"></i>已实证</span>
+    <span><i class="dot documented"></i>仅文档记载</span>
+    <span><i class="dot suspect"></i>存疑，需账套验证</span>
+  </div>
+</div>
+
+<div id="view-compose" hidden style="padding:20px 24px;max-width:840px">
+  <div class="eyebrow">业务操作编排</div>
+  <h2 style="font-size:16px;margin-bottom:4px">用你自己的说法给一件事命名</h2>
+  <p class="sub" style="margin:0 0 14px">
+    编好后导出 YAML，贴进 <code>profiles/&lt;租户&gt;/profile.yml</code> 的 <code>operations</code> 段，
+    之后直接说「帮我做<b id="opname-echo">销售开票</b>」就能用。
+  </p>
+  <div class="card">
+    <div class="form" style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+      <div><label for="opname">操作名</label><input id="opname" value="销售开票"></div>
+      <div><label for="opowner">责任部门</label><input id="opowner" value="财务部"></div>
+      <div><label for="opconfirm" style="margin-bottom:8px">执行前确认</label>
+        <input type="checkbox" id="opconfirm" checked style="width:auto"></div>
+    </div>
+    <div class="steps" id="steps"></div>
+    <div class="addbar">
+      <select id="stepkind"><option value="下推">下推</option><option value="确认">确认</option>
+        <option value="verb">动词</option></select>
+      <span id="argwrap"></span>
+      <button class="btn ghost" id="addstep">加一步</button>
+    </div>
+    <pre class="call" id="yaml"></pre>
+    <button class="copy" id="copyyaml">复制 YAML</button>
+  </div>
+</div>
+
+<script id="ontology-data" type="application/json">__ONTOLOGY_JSON__</script>
+<script>
+const D = JSON.parse(document.getElementById('ontology-data').textContent);
+const byId = Object.fromEntries(D.types.map(t => [t.form_id, t]));
+const CAT_ZH = {bill:'单据', master_data:'基础资料', view:'查询视图', system:'系统对象'};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+document.getElementById('counts').innerHTML =
+  [['对象类型', D.counts.types], ['动词', D.counts.verbs],
+   ['状态', D.counts.states], ['下推链接', D.counts.links]]
+  .map(([k, v]) => `${k} <b>${v}</b>`).join('');
+
+/* ── 可用性：与 base/objects.py:ActionType.availability 同一条规则 ──
+   规则就一行（当前状态 ∈ requires_state），所以这里现算而不是把整张矩阵
+   导出来存一遍；两处都从 verbs[verb].requires_state 取，来源仍是单一的。 */
+function availability(verb, state) {
+  const req = D.verbs[verb].requires_state || [];
+  if (!req.length) return {enabled: true};
+  if (state === null) return {enabled: true, unverified: true,
+    note: `未选状态，无法预判。本动作要求 ${req.join(' / ')}`};
+  if (req.includes(state)) return {enabled: true};
+  return {enabled: false, reason: `要求 ${req.join(' / ')}，当前是 ${state}`};
+}
+
+let cur = 'PUR_PurchaseOrder', curState = 'C:已审核', curAction = null, filter = '', cat = '';
+
+/* ── 左栏 ── */
+const cats = document.getElementById('cats');
+cats.innerHTML = ['', 'bill', 'master_data', 'view', 'system']
+  .map(c => `<button class="chip" data-cat="${c}" aria-pressed="${c === cat}">${c ? CAT_ZH[c] : '全部'}</button>`).join('');
+cats.onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return;
+  cat = b.dataset.cat; renderList(); };
+document.getElementById('q').oninput = e => { filter = e.target.value.trim().toLowerCase(); renderList(); };
+
+function renderList() {
+  cats.querySelectorAll('[data-cat]').forEach(b => b.setAttribute('aria-pressed', b.dataset.cat === cat));
+  const list = D.types.filter(t => (!cat || t.category === cat) &&
+    (!filter || `${t.form_id} ${t.zh} ${(t.alias || []).join(' ')}`.toLowerCase().includes(filter)));
+  document.getElementById('types').innerHTML = list.map(t => `
+    <button class="tbtn" data-id="${t.form_id}" aria-current="${t.form_id === cur}">
+      <span class="zh">${esc(t.zh)}</span>
+      <span class="n">${t.actions.length ? t.actions.length + '动作' : '只读'}</span>
+      <span class="fid">${t.form_id}</span>
+    </button>`).join('') || '<p class="empty">没有匹配的对象类型</p>';
+}
+document.getElementById('types').onclick = e => {
+  const b = e.target.closest('[data-id]'); if (!b) return;
+  cur = b.dataset.id; curAction = null;
+  const t = byId[cur];
+  curState = t.states.includes(curState) ? curState : (t.states[0] || null);
+  renderList(); renderCenter(); renderRight();
+};
+
+/* ── 中栏：对象卡片 ── */
+function renderCenter() {
+  const t = byId[cur];
+  const track = t.states.length ? `
+    <p class="tracknote">状态轨道（模拟）——点一个状态，右侧动作可用性随之变化</p>
+    <div class="track">${t.states.map(s => {
+      const st = D.states[s] || {};
+      return `<button class="stop ${st.terminal ? 'terminal' : ''}" data-state="${esc(s)}"
+        aria-pressed="${s === curState}"><span class="code">${esc(s.split(':')[0])}</span>
+        <span class="zh">${esc(st.zh || s)}</span></button>`;
+    }).join('')}</div>` : '<p class="tracknote">此类对象没有生命周期状态。</p>';
+
+  const links = t.links.length ? t.links.map(l => `
+    <button class="link" data-goto="${l.target_type}">
+      <i class="dot ${l.verified}"></i>
+      <span class="arrow">${l.direction === 'outgoing' ? '下推 →' : '← 由'}</span>
+      <span class="zh">${esc(l.target_zh)}</span>
+      <code style="font-size:11px;color:var(--ink-3)">${l.target_type}</code>
+    </button>${l.note ? `<p class="hint" style="margin:-2px 0 4px 26px">${esc(l.note)}</p>` : ''}`).join('')
+    : '<p class="empty">没有已登记的下推关系。未登记不代表不合法，只代表无法校验。</p>';
+
+  document.getElementById('center').innerHTML = `
+    <div class="card">
+      <div class="cardhead">
+        <h2>${esc(t.zh)}</h2>
+        <code class="badge">${t.form_id}</code>
+        <span class="badge cat">${CAT_ZH[t.category]}</span>
+        ${t.system_endpoint ? `<span class="badge">专用端点 ${t.system_endpoint}</span>` : ''}
+      </div>
+      ${(() => { const a = (t.alias || []).filter(x => x !== t.zh);
+        return a.length ? `<p class="sub" style="margin:6px 0 0">也叫：${a.map(esc).join('、')}</p>` : ''; })()}
+      ${track}
+    </div>
+    <div class="card">
+      <div class="eyebrow">属性 · ${t.properties.length}</div>
+      <p class="hint" style="margin:0 0 8px">标识：内码 <code>${t.id_property}</code> ·
+        编号 <code>${t.title_property}</code>。两者不通用——写操作要内码，下推要编号。</p>
+      <div class="grid2">${t.properties.map(p => `
+        <div class="prop"><span class="k">${esc(p.name)}</span>
+        <span class="t">${p.is_lookup ? '关联' : '标量'}</span></div>`).join('')}</div>
+    </div>
+    <div class="card">
+      <div class="eyebrow">链接 · ${t.links.length}</div>
+      <div class="links">${links}</div>
+    </div>`;
+
+  document.getElementById('center').onclick = e => {
+    const s = e.target.closest('[data-state]');
+    if (s) { curState = s.dataset.state; renderCenter(); renderRight(); return; }
+    const g = e.target.closest('[data-goto]');
+    if (g && byId[g.dataset.goto]) { cur = g.dataset.goto; curAction = null;
+      const t2 = byId[cur]; curState = t2.states[0] || null;
+      renderList(); renderCenter(); renderRight(); }
+  };
+}
+
+/* ── 右栏：动作检查器 ── */
+function renderRight() {
+  const t = byId[cur];
+  if (!t.actions.length) {
+    document.getElementById('right').innerHTML =
+      `<div class="eyebrow">动作</div><p class="empty">${CAT_ZH[t.category]}不接受写动词，只能查询。</p>`;
+    return;
+  }
+  const list = t.actions.map(a => {
+    const v = D.verbs[a.verb], av = availability(a.verb, curState);
+    const why = av.enabled === false ? `<p class="why">${esc(av.reason)}</p>`
+      : av.unverified ? `<p class="why warn">${esc(av.note)}</p>` : '';
+    return `<button class="act ${av.enabled ? '' : 'off'} ${v.destructive ? 'destructive' : ''}"
+      data-act="${a.verb}" aria-current="${a.verb === curAction}">
+      <span class="row1"><code class="v">${a.verb}</code><span class="zh">${esc(v.zh)}</span>
+        ${v.destructive ? '<span class="mini d">不可逆</span>' : ''}
+        <span class="mini a">${v.atomicity}</span></span>
+      ${why}</button>`;
+  }).join('');
+
+  let detail = '';
+  if (curAction) {
+    const a = t.actions.find(x => x.verb === curAction), v = D.verbs[curAction];
+    const av = availability(curAction, curState);
+    const args = a.params.map(p => p.name === 'targets'
+      ? `targets=["<${p.label}>"]`
+      : p.name === 'model' ? 'model={…}'
+      : p.name === 'target' ? 'noun="…", target="…"'
+      : `${p.name}="…"`).join(', ');
+    detail = `
+      <div class="card" style="margin-top:14px;padding:15px 16px">
+        <div class="eyebrow">${esc(v.zh)} · ${curAction}</div>
+        <div class="prop"><span class="k">原子性</span><span class="t">${v.atomicity}</span></div>
+        <div class="prop"><span class="k">幂等</span><span class="t">${v.idempotent ? '是' : '否'}</span></div>
+        <div class="prop"><span class="k">逆动词</span><span class="t">${v.inverse || '无 · 不可逆'}</span></div>
+        <div class="prop"><span class="k">到达状态</span><span class="t">${v.to_state || '不改变'}</span></div>
+        ${v.destructive ? `<p class="why" style="margin-top:9px">无逆动词，执行前必须取得明确确认。</p>` : ''}
+        ${av.enabled === false ? `<p class="why" style="margin-top:9px">当前状态下不可执行：${esc(av.reason)}</p>` : ''}
+        <div class="form">${a.params.map(p => `
+          <label>${esc(p.label)}${p.required ? ' *' : ''}</label>
+          ${p.type === 'model' ? '<textarea placeholder="{&quot;FDate&quot;: &quot;2026-09-02&quot;, …}"></textarea>'
+            : p.type === 'noun_ref' ? `<select>${t.links.filter(l => l.direction === 'outgoing')
+                .map(l => `<option value="${l.target_type}">${esc(l.target_zh)} · ${l.target_type}</option>`)
+                .join('') || '<option>无已登记的下推目标</option>'}</select>`
+            : '<input placeholder="' + esc(p.hint || '') + '">'}
+          ${p.hint ? `<p class="hint">${esc(p.hint)}</p>` : ''}`).join('')}</div>
+        <pre class="call">kd_act(
+  verb="${curAction}",
+  noun="${t.zh}",
+  ${args}
+)</pre>
+        <button class="copy" data-copy>复制调用</button>
+      </div>`;
+  }
+
+  document.getElementById('right').innerHTML =
+    `<div class="eyebrow">动作 · ${curState ? esc(curState) : '未选状态'}</div>${list}${detail}`;
+
+  document.getElementById('right').onclick = e => {
+    const b = e.target.closest('[data-act]');
+    if (b) { curAction = curAction === b.dataset.act ? null : b.dataset.act; renderRight(); return; }
+    if (e.target.closest('[data-copy]')) {
+      const pre = document.querySelector('#right pre.call');
+      navigator.clipboard?.writeText(pre.textContent).then(() => {
+        const btn = e.target.closest('[data-copy]'); btn.textContent = '已复制';
+        setTimeout(() => btn.textContent = '复制调用', 1400);
+      }).catch(() => {});
+    }
+  };
+}
+
+/* ── 链路图 ── */
+function renderGraph() {
+  const nodes = [...new Set(D.links.flatMap(l => [l.from, l.to]))];
+  const col = {}, out = {};
+  nodes.forEach(n => { out[n] = D.links.filter(l => l.from === n).length; });
+  nodes.forEach(n => { col[n] = D.links.some(l => l.to === n) ? (out[n] ? 1 : 2) : 0; });
+  const cols = [[], [], []];
+  nodes.forEach(n => cols[col[n]].push(n));
+  // 后续列按「第一个来源在上一列的位置」排序——不排的话连线会大面积交叉，
+  // 图还是对的，但读起来费劲。
+  for (let ci = 1; ci < 3; ci++) {
+    const prev = cols[ci - 1];
+    cols[ci].sort((a, b) => {
+      const rank = n => {
+        const src = D.links.filter(l => l.to === n).map(l => prev.indexOf(l.from))
+          .filter(i => i >= 0);
+        return src.length ? Math.min(...src) : 99;
+      };
+      return rank(a) - rank(b);
+    });
+  }
+  const W = 300, H = 66, PAD = 26;
+  const pos = {};
+  cols.forEach((c, ci) => c.forEach((n, ri) => { pos[n] = {x: PAD + ci * W, y: PAD + ri * H}; }));
+  const rows = Math.max(...cols.map(c => c.length), 1);
+  const w = PAD * 2 + W * 2 + 230, h = PAD * 2 + rows * H;
+
+  const edges = D.links.map(l => {
+    const a = pos[l.from], b = pos[l.to];
+    const x1 = a.x + 210, y1 = a.y + 18, x2 = b.x, y2 = b.y + 18;
+    const c = (x1 + x2) / 2;
+    const stroke = l.verified === 'suspect' ? 'var(--amber)'
+      : l.verified === 'confirmed' ? 'var(--accent)' : 'var(--ink-3)';
+    return `<path d="M${x1} ${y1} C${c} ${y1} ${c} ${y2} ${x2} ${y2}" fill="none"
+      stroke="${stroke}" stroke-width="1.5" ${l.verified === 'suspect' ? 'stroke-dasharray="4 3"' : ''}/>
+      <circle cx="${x2}" cy="${y2}" r="3" fill="${stroke}"/>`;
+  }).join('');
+
+  const boxes = nodes.map(n => {
+    const p = pos[n], t = byId[n];
+    return `<g><rect x="${p.x}" y="${p.y}" width="210" height="36" rx="6"
+      fill="var(--card)" stroke="var(--rule)"/>
+      <text x="${p.x + 11}" y="${p.y + 16}" font-size="12.5" fill="var(--ink)"
+        font-family="var(--sans)">${esc(t ? t.zh : n)}</text>
+      <text x="${p.x + 11}" y="${p.y + 29}" font-size="10" fill="var(--ink-3)"
+        font-family="var(--mono)">${esc(n)}</text></g>`;
+  }).join('');
+
+  document.getElementById('graph').innerHTML =
+    `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img"
+      aria-label="下推链路图，共 ${D.links.length} 条关系">${edges}${boxes}</svg>`;
+}
+
+/* ── 编排 ── */
+let steps = [
+  {做: '确认', 问: '将对这些销售订单生成开票申请并过账应收，确认继续？'},
+  {做: '下推', 从: 'SAL_SaleOrder', 到: 'SAL_OUTSTOCK'},
+  {做: 'submit', 对象: 'SAL_OUTSTOCK', 用: '上一步产物'},
+];
+const WRITE_VERBS = Object.entries(D.verbs).filter(([, v]) => v.kind === 'write').map(([k]) => k);
+
+function stepText(s) {
+  if (s.做 === '下推') return `下推：${byId[s.从]?.zh || s.从} → ${byId[s.到]?.zh || s.到}`;
+  if (s.做 === '确认') return `确认：${s.问}`;
+  return `${D.verbs[s.做]?.zh || s.做}：对 ${byId[s.对象]?.zh || s.对象}（${s.用}）`;
+}
+function renderCompose() {
+  document.getElementById('opname-echo').textContent =
+    document.getElementById('opname').value || '这个操作';
+  document.getElementById('steps').innerHTML = steps.length
+    ? steps.map((s, i) => `<div class="step"><span class="idx">${i + 1}</span>
+        <span>${esc(stepText(s))}</span>
+        <button class="x" data-del="${i}" aria-label="删除第 ${i + 1} 步">×</button></div>`).join('')
+    : '<p class="empty">还没有步骤。用下面的控件加一步。</p>';
+
+  const kind = document.getElementById('stepkind').value;
+  const opts = D.links.map(l =>
+    `<option value="${l.from}|${l.to}">${byId[l.from]?.zh || l.from} → ${byId[l.to]?.zh || l.to}</option>`).join('');
+  document.getElementById('argwrap').innerHTML =
+    kind === '下推' ? `<select id="arg1">${opts}</select>`
+    : kind === '确认' ? `<input id="arg1" size="34" placeholder="要让人确认什么？">`
+    : `<select id="arg1">${WRITE_VERBS.map(v => `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')}</select>
+       <select id="arg2">${D.types.filter(t => t.actions.length)
+         .map(t => `<option value="${t.form_id}">${esc(t.zh)}</option>`).join('')}</select>
+       <select id="arg3"><option>上一步产物</option><option>targets</option></select>`;
+
+  const name = document.getElementById('opname').value || '未命名操作';
+  const owner = document.getElementById('opowner').value;
+  const confirm = document.getElementById('opconfirm').checked;
+  const y = [`operations:`, `  ${name}:`, `    zh: ${name}`];
+  if (owner) y.push(`    owner: ${owner}`);
+  if (confirm) y.push(`    confirm: true`);
+  y.push(`    steps:`);
+  steps.forEach(s => {
+    if (s.做 === '下推') y.push(`      - {做: 下推, 从: ${s.从}, 到: ${s.到}}`);
+    else if (s.做 === '确认') y.push(`      - {做: 确认, 问: "${s.问}"}`);
+    else y.push(`      - {做: ${s.做}, 对象: ${s.对象}, 用: ${s.用}}`);
+  });
+  document.getElementById('yaml').textContent = y.join('\n');
+}
+document.getElementById('view-compose').addEventListener('input', renderCompose);
+document.getElementById('stepkind').onchange = renderCompose;
+document.getElementById('addstep').onclick = () => {
+  const kind = document.getElementById('stepkind').value;
+  const a1 = document.getElementById('arg1');
+  if (kind === '下推') { const [f, t] = a1.value.split('|'); steps.push({做: '下推', 从: f, 到: t}); }
+  else if (kind === '确认') { if (!a1.value.trim()) return; steps.push({做: '确认', 问: a1.value.trim()}); a1.value = ''; }
+  else steps.push({做: a1.value, 对象: document.getElementById('arg2').value,
+                   用: document.getElementById('arg3').value});
+  renderCompose();
+};
+document.getElementById('steps').onclick = e => {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  steps.splice(+b.dataset.del, 1); renderCompose();
+};
+document.getElementById('copyyaml').onclick = e => {
+  navigator.clipboard?.writeText(document.getElementById('yaml').textContent).then(() => {
+    e.target.textContent = '已复制'; setTimeout(() => e.target.textContent = '复制 YAML', 1400);
+  }).catch(() => {});
+};
+
+/* ── 标签页 ── */
+document.querySelector('.tabs').onclick = e => {
+  const b = e.target.closest('[data-view]'); if (!b) return;
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t === b));
+  ['obj', 'graph', 'compose'].forEach(v =>
+    document.getElementById('view-' + v).hidden = v !== b.dataset.view);
+  if (b.dataset.view === 'graph') renderGraph();
+  if (b.dataset.view === 'compose') renderCompose();
+};
+
+renderList(); renderCenter(); renderRight();
+</script>

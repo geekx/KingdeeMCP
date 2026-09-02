@@ -85,6 +85,16 @@ jobs:
           KINGDEE_PASSWORD: '-'
         run: python tools/ontology/update_readme.py --check
 
+      - name: 对象层与界面数据可生成
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          python -m pytest tests/test_object_layer.py -q
+          python tools/ontology/export_for_ui.py
+          python tools/ontology/build_ui.py
+          git diff --exit-code --stat docs/ontology/ui/ \
+            || (echo "✗ 本体改了但 ui/ 没重新生成：跑 export_for_ui.py + build_ui.py 后提交" && exit 1)
+
       - name: WikiSkill 自优化链路可运行
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src

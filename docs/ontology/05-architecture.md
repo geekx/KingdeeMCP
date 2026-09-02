@@ -217,6 +217,58 @@ python3 -m wikiskill.retro --reject <id> --note "业务上就是这样"
 | `unlinked_push` | 被 PRE-02 拦下的下推 | 补租户 `links`，或固化正确链路 |
 | `slow` | 超过 5s 的操作 | 收窄字段集、减小批量 |
 
+## 4.2 对象层：把本体从「审计产物」变成「操作面」
+
+前面几节把本体建起来是为了审计；但本体真正的用处是**操作**。
+参照 Palantir Foundry 的 Ontology：使用者面对的不该是一堆工具，而是**对象**——
+打开一个对象，看到它的属性、它现在处于什么状态、它连到哪些别的对象、
+以及**此刻能对它做哪些动作**。
+
+`base/objects.py` 由 `registry.yml` 推导出三个概念，不额外维护第二份定义：
+
+| 概念 | 是什么 | 来自 |
+|---|---|---|
+| `ObjectType` | 对象类型 + 属性 + 状态机 + 可用动作 + 出入链接 | 名词 |
+| `ActionType` | 动词 + 参数 schema + 前置条件 + 契约 | 动词 |
+| `ObjectCard` | 某实例：属性值 + 当前状态 + 此刻可用/不可用的动作 | 二者合成 |
+
+入口是一个工具 `kd_object`：
+
+```
+kd_object(search="采购")                    搜对象类型
+kd_object(noun="采购订单")                   类型卡片
+kd_object(noun="采购订单", id="CGDD000231")  实例卡片
+kd_object(noun="采购订单", id="…", navigate_to="采购入库单")   怎么跳到下游
+```
+
+三条设计约束：
+
+**① 类型卡片与实例卡片同形状。** 使用者不该为「看这类东西长什么样」和
+「看这一个东西」学两套结构。
+
+**② 动作可用性必须带原因。** `enabled: false` 一定附 `reason`
+（"要求 `B:审核中`，当前是 `C:已审核`"）。灰掉却不解释的按钮比没有按钮更让人困惑。
+状态取不到时标 `unverified: true`——**不猜**。
+
+**③ 导航只给「怎么查」，不替调用方猜。** 下游单据引用源单的字段名
+（`FSrcBillNo` / `FSourceBillNo` / …）随表单和二开而异，静态推断不出唯一答案。
+返回候选过滤式 + 一句"试通之后请写进 profile 固化下来"。
+
+### 两种形态，同一套本体
+
+| 形态 | 位置 | 给谁用 |
+|---|---|---|
+| **Skill 形态** | [`skill/kingdee-ontology/`](../../skill/kingdee-ontology/) | Claude：以对象为中心操作，不再先想"该调哪个工具" |
+| **界面形态** | [`docs/ontology/ui/`](ui/) | 人：浏览对象、模拟动作可用性、看链路、编排业务操作 |
+
+界面**不连账套**——它操作的是本体定义。三个视图：
+
+- **对象**：状态轨道用金蝶自己的字母码（`Z/A/B/C/D` + `CLOSED/VOID/DELETED`）做进度条，
+  点一个状态，右侧动作可用性立刻重算；
+- **链路图**：9 条下推关系，存疑的那条（`PRD_PickMtrl → PRD_Instock`）画成虚线琥珀；
+- **业务操作编排**：拼出步骤导出 YAML，**直接可过 `validate_profile`**，
+  贴进 `profiles/<租户>/profile.yml` 就能用——和面向业务人员的配置面闭环。
+
 ## 4.5 只读长尾的收敛
 
 97 个工具里有 72 个是只读的。收敛后 **68 个（94%）可由底座的 9 个工具表达**：
@@ -309,7 +361,14 @@ skill/kingdee-ontology/  Skill 实例层（渐进披露）
 wikiskill/
   knowledge.py           知识条目：累积、置信度、状态
   retro.py               每日回溯与自优化
+base/objects.py          对象层：ObjectType / ActionType / ObjectCard
+docs/ontology/ui/        界面形态（Ontology Explorer）
+  _shell.html            模板（手改）
+  ontology.json          本体导出（生成）
+  explorer.html          成品（生成，勿手改）
 tools/ontology/
+  export_for_ui.py       本体 → UI 数据
+  build_ui.py            数据注入模板 → 成品页面
   operation_audit.py     过程操作审计记录器
   measure_tool_surface.py  token 成本实测
   audit_atomicity.py     原子性审计（CI）

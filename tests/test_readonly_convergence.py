@@ -127,17 +127,28 @@ class TestDryRun:
 
 
 class TestToolSurfaceStillSmall:
-    def test_nine_tools_cover_the_converged_readonly_surface(self):
-        """收敛了 40+13 个只读工具后，底座仍只有 9 个工具。"""
+    def test_tool_surface_stays_bounded(self):
+        """收敛了 60+ 个只读工具、又加上对象层之后，底座工具数仍受控。
+
+        不写死具体数字——加能力是正常的；但**能力数必须与名词数脱钩**，
+        否则就退回"每个单据一个工具"的老路。上限设在 12：
+        真要突破，应该先问"这是不是又把实例当成了能力"。
+        """
         import os
         os.environ.setdefault("KINGDEE_PASSWORD", "-")
         sys.path.insert(0, str(ROOT / "src"))
         from base.server import mcp
-        tools = asyncio.run(mcp.list_tools())
-        assert len(tools) == 9
-        assert {t.name for t in tools} == {
-            "kd_describe", "kd_query", "kd_act", "kd_push", "kd_read",
-            "kd_report", "kd_run", "kd_audit", "kd_check_profile"}
+        from base.ontology import load as _load
+        tools = {t.name for t in asyncio.run(mcp.list_tools())}
+        assert len(tools) <= 12, f"底座工具数 {len(tools)} 超出上限：{sorted(tools)}"
+        core = {"kd_describe", "kd_query", "kd_act", "kd_push", "kd_object",
+                "kd_read", "kd_report", "kd_run", "kd_audit", "kd_check_profile"}
+        assert core <= tools, f"缺少核心工具：{sorted(core - tools)}"
+
+        _load.cache_clear()
+        nouns = len(_load(tenant="").nouns)
+        assert nouns >= 84 and len(tools) <= 12, (
+            f"{nouns} 个名词由 {len(tools)} 个工具承载——名词与工具数必须脱钩")
 
 
 @pytest.fixture(scope="module")
