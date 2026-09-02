@@ -14,6 +14,8 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
 
 from base.objects import ObjectModel                            # noqa: E402
+from indexlayer.store import ObjectIndex                        # noqa: E402
+from pipeline.run import Pipeline                               # noqa: E402
 from base.ontology import Ontology, OntologyError, load        # noqa: E402
 from base.transport import KingdeeTransport, Transport         # noqa: E402
 from operation_audit import audit_recorder                     # noqa: E402
@@ -82,9 +84,16 @@ def _ok(result: Any) -> tuple[bool, list]:
 class Dispatcher:
     def __init__(self, ontology: Optional[Ontology] = None,
                  transport: Optional[Transport] = None,
-                 actor: str = "unknown"):
+                 actor: str = "unknown", tenant: str = "",
+                 index: Optional[ObjectIndex] = None):
         self.o = ontology or load()
         self.t = transport or KingdeeTransport()
+        self.tenant = tenant
+        # 数据加工层：解析 + 标准化 + 血缘 + 出处。查询结果都过这条管道，
+        # 不再各处自己拆 JSON——那正是字段名和状态码乱掉的来源。
+        self.pipe = Pipeline(self.o, tenant=tenant)
+        # Funnel 索引层：可选。不给就不物化，查询照常工作。
+        self.index = index
         self.actor = actor
         self.m = ObjectModel(self.o)
         # 业务操作执行期间共享的审计上下文：让一次操作的所有步骤共用同一 trace_id。
@@ -140,6 +149,15 @@ class Dispatcher:
                 await self._one(op, v, n, ",".join(targets),
                                 {"Ids": ",".join(targets)}, out, current_state,
                                 operation=operation, batch_targets=targets)
+
+        # Action 闭环：写操作之后索引里的这些对象就不可信了，标脏。
+        # 不自动回源刷新——那会让每次写都多一轮往返；如实标脏，让检索方决定。
+        if self.index is not None and out["succeeded"]:
+            marked = self.index.mark_stale(n.form_id, out["succeeded"],
+                                           f"{v.name} 执行后")
+            if marked:
+                out["index_stale"] = {"noun": n.form_id, "marked": marked,
+                                      "note": "索引中这些对象已标脏，检索会如实告知"}
 
         n_fail = len(out["failed"])
         out["success"] = n_fail == 0
@@ -258,12 +276,34 @@ class Dispatcher:
         _, n = self.o.check_verb_applies("query", refs[0])
         fk = fields or n.default_fields
         if n.system_endpoint:
-            rows = await self.t.system_query(n.system_endpoint, n.form_id, fk, filter_string, top)
+            raw = await self.t.system_query(n.system_endpoint, n.form_id, fk,
+                                            filter_string, top)
         else:
-            rows = await self.t.query(n.form_id, fk, filter_string, top)
-        rows = rows if isinstance(rows, list) else _rows_of(rows)
-        return {"noun": n.form_id, "zh": n.zh, "category": n.category,
-                "count": len(rows), "fields": fk, "rows": rows}
+            raw = await self.t.query(n.form_id, fk, filter_string, top)
+
+        ds = self.pipe.from_query(n.form_id, raw, field_keys=fk,
+                                  filter_string=filter_string, top=top)
+        if self.index is not None:
+            self.index.upsert(ds)
+        q = ds.quality()
+        out = {"noun": n.form_id, "zh": n.zh, "category": n.category,
+               "count": len(ds), "fields": fk, "rows": ds.rows,
+               "provenance": {"source": ds.provenance.source,
+                              "fetched_at": ds.provenance.fetched_at,
+                              "truncated": ds.provenance.truncated}}
+        # 只在有话说的时候才带质量提示，别把正常结果也堆满元数据
+        if q["missing_columns"]:
+            out["missing_columns"] = q["missing_columns"]
+            out["missing_note"] = ("这些字段请求了但响应里一行都没有——"
+                                   "在本账套可能不存在（二开删了或改名了），"
+                                   "与『取到了但为空』是两回事。")
+        if q["state_unresolved"]:
+            out["state_unresolved"] = q["state_unresolved"]
+            out["state_note"] = ("这些行的状态归一不出来，对象层只能标 unverified。"
+                                 "多半是 FDocumentStatus 没在字段集里。")
+        if ds.provenance.truncated:
+            out["truncated_note"] = f"命中 top={top} 上限，还有更多没取到。"
+        return out
 
     async def read(self, noun: str, bill_id: str) -> dict:
         """查看单据详情（View 端点）。"""

@@ -85,6 +85,21 @@ jobs:
           KINGDEE_PASSWORD: '-'
         run: python tools/ontology/update_readme.py --check
 
+      - name: 数据加工层与索引层
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/test_pipeline_index.py -q
+
+      # 界面交互回归：真驱动 Chromium 点一遍。
+      # "选了不生效"这类缺陷读代码很难发现（每个函数单看都对），必须真点。
+      - name: 界面交互回归（编排器下拉）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+        run: |
+          pip install -q playwright && python -m playwright install --with-deps chromium
+          python -m pytest tests/test_ui_composer.py -q
+
       - name: 对象层与界面数据可生成
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src

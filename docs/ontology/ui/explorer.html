@@ -546,7 +546,45 @@ function stepText(s) {
   if (s.做 === '确认') return `确认：${s.问}`;
   return `${D.verbs[s.做]?.zh || s.做}：对 ${byId[s.对象]?.zh || s.对象}（${s.用}）`;
 }
-function renderCompose() {
+/* ⚠️ 这里曾有一个 bug：renderCompose 绑在整个面板的 input 事件上，
+   而它会重建 #argwrap 的 innerHTML。于是用户一选下拉就触发重建，
+   select 被换成新元素、回到第一项——**永远只有第一条能进 YAML**。
+
+   修法是把「重建控件」和「刷新预览」彻底分开：
+     renderArgs()    只在步骤类型变化时重建控件；
+     renderPreview() 输入时只刷新步骤列表与 YAML，绝不碰 #argwrap。 */
+function renderArgs() {
+  const kind = document.getElementById('stepkind').value;
+  const wrap = document.getElementById('argwrap');
+  const opts = D.links.map(l =>
+    `<option value="${l.from}|${l.to}">${byId[l.from]?.zh || l.from} → ${byId[l.to]?.zh || l.to}</option>`).join('');
+  wrap.innerHTML =
+    kind === '下推' ? `<select id="arg1" aria-label="下推关系">${opts}</select>`
+    : kind === '确认' ? `<input id="arg1" size="34" placeholder="要让人确认什么？" aria-label="确认问题">`
+    : `<select id="arg1" aria-label="动词">${WRITE_VERBS.map(v =>
+         `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')}</select>
+       <select id="arg2" aria-label="对象"></select>
+       <select id="arg3" aria-label="用什么"><option>上一步产物</option><option>targets</option></select>`;
+  if (kind !== '下推' && kind !== '确认') syncObjectOptions();
+}
+
+/* 对象下拉必须跟着动词过滤，只列**这个动词真的适用**的对象类型。
+   不过滤的话可以拼出「反审核 + 仓库」这种组合——基础资料没有审核流，
+   校验器会拒，可界面却让你选得出来。让人拼出一个不成立的东西，
+   比不让他拼更糟：他会以为是配置系统坏了。 */
+function syncObjectOptions() {
+  const verb = document.getElementById('arg1').value;
+  const sel = document.getElementById('arg2');
+  if (!sel) return;
+  const keep = sel.value;
+  const ok = D.types.filter(t => t.actions.some(a => a.verb === verb));
+  sel.innerHTML = ok.map(t =>
+    `<option value="${t.form_id}">${esc(t.zh)}</option>`).join('')
+    || '<option value="">没有对象支持这个动词</option>';
+  if (ok.some(t => t.form_id === keep)) sel.value = keep;   // 仍适用就保住原选择
+}
+
+function renderPreview() {
   document.getElementById('opname-echo').textContent =
     document.getElementById('opname').value || '这个操作';
   document.getElementById('steps').innerHTML = steps.length
@@ -554,17 +592,6 @@ function renderCompose() {
         <span>${esc(stepText(s))}</span>
         <button class="x" data-del="${i}" aria-label="删除第 ${i + 1} 步">×</button></div>`).join('')
     : '<p class="empty">还没有步骤。用下面的控件加一步。</p>';
-
-  const kind = document.getElementById('stepkind').value;
-  const opts = D.links.map(l =>
-    `<option value="${l.from}|${l.to}">${byId[l.from]?.zh || l.from} → ${byId[l.to]?.zh || l.to}</option>`).join('');
-  document.getElementById('argwrap').innerHTML =
-    kind === '下推' ? `<select id="arg1">${opts}</select>`
-    : kind === '确认' ? `<input id="arg1" size="34" placeholder="要让人确认什么？">`
-    : `<select id="arg1">${WRITE_VERBS.map(v => `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')}</select>
-       <select id="arg2">${D.types.filter(t => t.actions.length)
-         .map(t => `<option value="${t.form_id}">${esc(t.zh)}</option>`).join('')}</select>
-       <select id="arg3"><option>上一步产物</option><option>targets</option></select>`;
 
   const name = document.getElementById('opname').value || '未命名操作';
   const owner = document.getElementById('opowner').value;
@@ -580,8 +607,20 @@ function renderCompose() {
   });
   document.getElementById('yaml').textContent = y.join('\n');
 }
-document.getElementById('view-compose').addEventListener('input', renderCompose);
-document.getElementById('stepkind').onchange = renderCompose;
+
+function renderCompose() { renderArgs(); renderPreview(); }
+
+/* 只监听真正需要刷新预览的输入，且**不重建控件**。
+   用 change 而非 input 监听 stepkind，避免与下面的 onchange 打架。 */
+document.getElementById('view-compose').addEventListener('input', e => {
+  if (e.target.closest('#argwrap')) return;   // 控件区的输入与预览无关
+  renderPreview();
+});
+document.getElementById('stepkind').onchange = () => { renderArgs(); renderPreview(); };
+/* 换动词时重算对象下拉。用事件委托——控件是动态生成的，直接绑会在重建后失效。 */
+document.getElementById('argwrap').addEventListener('change', e => {
+  if (e.target.id === 'arg1') syncObjectOptions();
+});
 document.getElementById('addstep').onclick = () => {
   const kind = document.getElementById('stepkind').value;
   const a1 = document.getElementById('arg1');
@@ -589,11 +628,11 @@ document.getElementById('addstep').onclick = () => {
   else if (kind === '确认') { if (!a1.value.trim()) return; steps.push({做: '确认', 问: a1.value.trim()}); a1.value = ''; }
   else steps.push({做: a1.value, 对象: document.getElementById('arg2').value,
                    用: document.getElementById('arg3').value});
-  renderCompose();
+  renderPreview();          // 只刷预览，保住控件当前选择
 };
 document.getElementById('steps').onclick = e => {
   const b = e.target.closest('[data-del]'); if (!b) return;
-  steps.splice(+b.dataset.del, 1); renderCompose();
+  steps.splice(+b.dataset.del, 1); renderPreview();
 };
 document.getElementById('copyyaml').onclick = e => {
   navigator.clipboard?.writeText(document.getElementById('yaml').textContent).then(() => {

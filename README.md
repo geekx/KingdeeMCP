@@ -8,8 +8,8 @@
 ## 本分支的增补：操作原子化审计 + Ontology 建模 + 三层架构
 
 > **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.2.1`
-> **更新于** 2026-09-02 19:38 UTC+08:00
-> **测试** 2724 passed, 401 skipped in 21.87s ｜ **原子性审计** 5 项发现 / 0 项 error
+> **更新于** 2026-09-02 21:36 UTC+08:00
+> **测试** 2753 passed, 401 skipped in 42.08s ｜ **原子性审计** 5 项发现 / 0 项 error
 >
 > 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
 
