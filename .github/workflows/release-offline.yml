@@ -1,0 +1,88 @@
+name: 离线包
+
+# 打 tag 时造离线包并挂到 Release 上。
+# 内网机器装不了 pip，得有人从这里下载、拷 U 盘带进去——所以产物必须现成，
+# 不能要求对方"自己 clone 下来构建"（那台机器连 clone 都做不到）。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '目标平台标签（留空＝本机平台）。如 win_amd64'
+        required: false
+      python-version:
+        description: '目标 Python 版本（留空＝本机）。如 3.11'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装构建依赖
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[test]" "mcp<2" PyYAML build
+
+      # 造之前先确认它真能用。造完就发、发出去才发现跑不起来，
+      # 收件人是一台没网的机器，改都没法改。
+      - name: 先验后造
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          python -m pytest tests/test_offline_package.py tests/test_packaging.py \
+            -q -m "slow or not slow"
+
+      - name: 造离线包
+        run: |
+          python tools/package/build_offline.py --extras sql \
+            ${{ inputs.platform && format('--platform {0}', inputs.platform) || '' }} \
+            ${{ inputs.python-version && format('--python-version {0}', inputs.python-version) || '' }}
+
+      - name: 打成一个压缩包
+        run: |
+          cd dist && tar czf kingdee-mcp-offline.tar.gz offline/
+          sha256sum kingdee-mcp-offline.tar.gz | tee kingdee-mcp-offline.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kingdee-mcp-offline
+          path: |
+            dist/kingdee-mcp-offline.tar.gz
+            dist/kingdee-mcp-offline.tar.gz.sha256
+            dist/offline/kd-logic.pyz
+
+      - name: 挂到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/kingdee-mcp-offline.tar.gz
+            dist/kingdee-mcp-offline.tar.gz.sha256
+            dist/offline/kd-logic.pyz
+          body: |
+            ## 离线安装
+
+            内网／隔离网段用。下载后拷进去即可，不需要目标机器联网。
+
+            | 文件 | 用途 |
+            |---|---|
+            | `kd-logic.pyz` | 单文件判断层，**不用装**：`python3 kd-logic.pyz can audit 销售订单 --state B:审核中` |
+            | `kingdee-mcp-offline.tar.gz` | 完整离线安装：解开后 `sh offline/wheelhouse/install.sh` |
+
+            装之前先核对 `sha256sum`——U 盘和邮件附件传坏了要能发现。
+
+            `wheelhouse/` 里的轮子**认平台**（Linux x86_64 / Python 3.11）。
+            别的平台请用 `workflow_dispatch` 指定 `platform` 与 `python-version` 重造。
+            `[sql]` 另需操作系统装好 unixODBC。

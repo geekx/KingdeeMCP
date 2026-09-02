@@ -356,6 +356,24 @@ def load_profile(tenant: Optional[str]) -> Optional[dict]:
     return data
 
 
+def registry_text(path: Optional[str] = None) -> str:
+    """读注册表。
+
+    不能只用 `Path.read_text`：打成 zipapp（离线单文件包）之后，包目录不是
+    真实目录，`__file__` 指向 zip 内部的一个伪路径，open() 直接失败。
+    importlib.resources 对"装在磁盘上"和"装在 zip 里"两种情形都认，
+    所以它是主路径，文件系统只作兜底。
+    """
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    try:
+        from importlib.resources import files
+        return files("kingdee_ontology.base").joinpath(
+            "registry.yml").read_text(encoding="utf-8")
+    except Exception:
+        return REGISTRY_PATH.read_text(encoding="utf-8")
+
+
 @functools.lru_cache(maxsize=8)
 def load(path: Optional[str] = None, tenant: Optional[str] = None) -> Ontology:
     """加载本体。tenant 非空时叠加该租户的覆盖层。
@@ -364,7 +382,5 @@ def load(path: Optional[str] = None, tenant: Optional[str] = None) -> Ontology:
     同一份代码即可服务不同账套（「避免一种米养几种人」）。
     """
     import os
-    p = Path(path) if path else REGISTRY_PATH
     tenant = tenant if tenant is not None else os.environ.get("KINGDEE_TENANT", "")
-    return Ontology(yaml.safe_load(p.read_text(encoding="utf-8")),
-                    load_profile(tenant))
+    return Ontology(yaml.safe_load(registry_text(path)), load_profile(tenant))

@@ -550,6 +550,54 @@ $ kd-logic can audit 销售订单 --state Z:暂存
 当前目录 `profiles/` → 包内示例。site-packages 是只读的、升级即被覆盖，
 真实租户配置住在那里迟早丢。
 
+### 6.1 离线包
+
+金蝶云星空常部署在内网／隔离网段——装东西要先申请开外网，或者压根开不了。
+所以「能不能离线装」对这个项目不是锦上添花。
+
+```bash
+python3 tools/package/build_offline.py --extras sql
+```
+
+产出两种，对应两种不同的离线处境：
+
+| 产物 | 是什么 | 适用 |
+|---|---|---|
+| `kd-logic.pyz` | 单文件 157 KB，**不用装** | 只要判断层。有个 Python 3.10+ 就能跑 |
+| `wheelhouse/` | 39 个 wheel + 安装脚本 | 完整安装（含 MCP 服务端） |
+
+```bash
+python3 kd-logic.pyz can audit 销售订单 --state B:审核中   # 什么都不用装
+sh wheelhouse/install.sh                                   # pip --no-index 装全套
+```
+
+`kd-logic.pyz` 自带 PyYAML 的纯 Python 实现和本体注册表，
+**在一个连 PyYAML 都没有的解释器上**也能跑（`tests/test_offline_package.py`
+专门建一个空 venv 来证明这件事——用当前解释器测等于没测）。
+
+三个不显眼但要命的点：
+
+- **不能带二进制扩展。** zipimport 加载不了 `.so`/`.pyd`，混进去只会在
+  没网的那台机器前面才炸。构建时直接拒绝。
+- **退出码必须真传出来。** `zipapp` 的 `main=` 生成的入口是
+  `cli.main()`——返回值被丢掉，退出码恒为 0，于是「不可以」和「事实不全」
+  都被当成「可以」。故自己写 `__main__.py`。第一版就是这么错的。
+- **注册表要用 `importlib.resources` 读。** 打进 zip 之后包目录不是真实目录，
+  `Path.read_text` 直接失败。
+
+`wheelhouse/` **认平台**：`pydantic-core`、`PyYAML`、`pyodbc` 都带二进制轮子，
+Linux 上造的装不到 Windows 上去。跨平台造：
+
+```bash
+python3 tools/package/build_offline.py --platform win_amd64 --python-version 3.11
+```
+
+`MANIFEST.json` 带每个文件的 SHA256——离线传输往往靠 U 盘和邮件附件，
+传坏了要能发现。
+
+> `[sql]` 还需要**操作系统层面**装好 unixODBC（Linux 上是 `libodbc.so.2`）。
+> 这是 pyodbc 的运行时依赖，wheel 带不了，也正是把它移出必装项的原因。
+
 ## 7. 目录
 
 ```

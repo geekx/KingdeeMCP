@@ -127,3 +127,10 @@ jobs:
         run: |
           pip install -q build
           python -m pytest tests/test_packaging.py -q -m "slow or not slow"
+
+      # 离线包是给内网／隔离网段用的。它坏了的表现是"到了没网的机器前面才炸"，
+      # 那时候没人能修——所以必须在这里就用一个空解释器验一遍。
+      - name: 离线包可在零依赖环境运行
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/test_offline_package.py -q -m "slow or not slow"

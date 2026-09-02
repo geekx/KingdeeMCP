@@ -54,6 +54,31 @@
 编译的依赖。改为 `pip install kingdee-mcp[sql]`。导入处早已惰性并带安装
 提示，不影响任何现有调用。
 
+### 新增：离线包（内网／隔离网段）
+
+金蝶云星空常部署在开不了外网的机器上，所以离线安装是刚需而非锦上添花。
+`python3 tools/package/build_offline.py` 造两种产物：
+
+- **`kd-logic.pyz`**（157 KB，单文件，**不用装**）——自带 PyYAML 纯 Python
+  实现与本体注册表，在连 PyYAML 都没有的解释器上照样跑。
+- **`wheelhouse/`**（39 个 wheel + 安装脚本）——`pip install --no-index` 装全套。
+  认平台，可 `--platform win_amd64 --python-version 3.11` 跨平台造。
+
+`MANIFEST.json` 带每个文件的 SHA256：离线传输靠 U 盘和邮件附件，传坏了要能发现。
+
+打 tag 时由 `.github/workflows/release-offline.yml` 自动造好挂到 Release——
+内网机器连 clone 都做不到，不能要求对方自己构建。
+
+造这个包时踩到并修掉的三处：
+
+- `zipapp` 的 `main=` 生成的入口是 `cli.main()`，**返回值被丢掉，退出码恒为 0**
+  ——于是「不可以」和「事实不全」都被当成「可以」，恰好是最坏的坏法。
+  改为自己写 `__main__.py`。
+- 注册表原用 `Path.read_text` 读，打进 zip 后包目录不是真实目录，直接失败。
+  改用 `importlib.resources`（两种情形都认），文件系统只作兜底。
+- 构建时拒绝任何 `.so`/`.pyd`：zipimport 加载不了，混进去只会在没网的
+  那台机器前面才炸。
+
 ### 新增：打包保护（`tests/test_packaging.py`）
 
 打包缺陷对普通测试是隐形的——conftest 补了 `sys.path`，于是「只在源码树
