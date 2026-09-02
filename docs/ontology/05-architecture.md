@@ -270,6 +270,28 @@ SQL Server 目录探查（`discover_tables` / `discover_columns` / `describe_tab
 3. 只读长尾已收敛 94%，剩余 4 个 SQL 探查工具仍走原路径（刻意保留，见 4.5）；
 4. WikiSkill 的回溯同时读两边的日志。
 
+## 5.5 CI：把会悄悄失效的保护做成硬门禁
+
+`.github/workflows/ontology-check.yml`（与既有的 `harness-check.yml` 互补——
+后者只跑 `tests/test_server.py` 一个文件）。
+
+这些检查的共同点是**会随时间悄悄失效**，所以必须由机器守：
+
+| 门禁 | 守住什么 | 失效场景 |
+|---|---|---|
+| 全量测试 | — | — |
+| `audit_atomicity.py` | 不允许 error 级发现 | 新写工具重新引入无补偿 Saga |
+| `test_harness_coverage.py` | 写工具 100% 登记 | 新增写工具忘了登记 → 不受任何操作链约束 |
+| `test_readonly_convergence.py` | 收敛率不跌破 94%，未收敛必须写明理由 | 新查询工具绕过底座，覆盖率悄悄下滑 |
+| `validate_profile` | 租户配置可解析 | 改注册表后示例配置失效 |
+| `extract_ontology.py` | 本体可抽取 | 代码结构变化后抽取器失灵（审计器盲区，`04-audit-trail.md` 有记录） |
+| `measure_tool_surface.py` | token 账可复现 | — |
+| `update_readme.py --check` | README 数字与代码一致 | 加了测试/名词后 README 落后 |
+| `wikiskill.retro` | 自优化链路可运行 | 审计记录格式变更后回溯断链 |
+
+最后一条值得说明：README 里的数字是**实测生成**的，所以加了测试或改了注册表之后
+需要重跑 `update_readme.py` 再提交。这条失败不代表代码有问题，只代表 README 落后于代码。
+
 ## 6. 目录
 
 ```

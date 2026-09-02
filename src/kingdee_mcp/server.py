@@ -513,8 +513,12 @@ def _parse_kingdee_errors(result: Any) -> list:
     return errors
 
 
-def _result_status(result: Any, op: str) -> dict:
-    """构建结构化操作结果（约束层 + 反馈层）"""
+def _result_status(result: Any, op: str, link_check: Optional[dict] = None) -> dict:
+    """构建结构化操作结果（约束层 + 反馈层）。
+
+    link_check：push 类操作可带上下推链接的校验结果（审计 L-1），
+    让调用方知道这条转换关系是否已登记、是否被标记存疑。
+    """
     rs = result.get("Result", result) if isinstance(result, dict) else {}
     status = rs.get("ResponseStatus", {})
 
@@ -549,6 +553,12 @@ def _result_status(result: Any, op: str) -> dict:
             "单据操作失败，请检查 errors 列表中的 reason 和 suggestion 字段。"
             "如需更多信息，调用 kingdee_view_bill 查看单据详情。"
         )
+    if link_check and link_check.get("status") != "skipped":
+        out["link_check"] = link_check
+        if link_check.get("status") == "unregistered":
+            out["link_warning"] = link_check["hint"]
+        elif link_check.get("warning"):
+            out["link_warning"] = link_check["warning"]
     if ok:
         # next_action 始终返回（None 表示流程完成）
         out["next_action"] = lifecycle.get("next_action")
@@ -1931,6 +1941,61 @@ async def _post(ep_key: str, payload: Any) -> Any:
         )
 
 
+# ─────────────────────────────────────────────
+# 下推链接校验（审计 L-1 / MISS-02）
+#
+# legacy 的 5 个 push 工具把源单/目标单硬编码在各自函数体里，或干脆开放成自由参数，
+# 系统内没有可校验「某条下推是否合法」的地方——只能发请求等服务端报错。
+# 底座已有集中链接表（base/registry.yml:links）并在发请求前拦截；
+# 这里让 legacy 也用上同一份表。
+#
+# 默认**只警告不阻断**：链接表目前只登记了 9 条，而金蝶实际支持的转换关系远不止，
+# 硬拦会误伤正在用合法但未登记关系的调用方。
+# 需要严格模式时设 KINGDEE_STRICT_LINKS=1，未登记的下推会在发请求前被拒。
+#
+# 校验点放在 _post_raw 的 push 分支——这是所有下推路径（含 3 个复合工具）的
+# 唯一咽喉点，一处覆盖全部，不必在 6 个函数里各加一遍。
+# ─────────────────────────────────────────────
+
+_STRICT_LINKS = os.environ.get("KINGDEE_STRICT_LINKS", "").lower() in ("1", "true", "yes")
+
+
+def _check_push_link(source_form: str, target_form: str) -> dict:
+    """对照底座链接表检查一条下推关系。底座不可用时静默跳过（返回 skipped）。"""
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        root = _Path(__file__).resolve().parents[2]
+        if str(root) not in _sys.path:
+            _sys.path.insert(0, str(root))
+        from base.ontology import load as _load
+        onto = _load(tenant=os.environ.get("KINGDEE_TENANT", ""))
+    except Exception:
+        return {"status": "skipped", "reason": "底座链接表不可用"}
+
+    link = next((l for l in onto.links
+                 if l.get("from") == source_form and l.get("to") == target_form), None)
+    if link is None:
+        known = [l["to"] for l in onto.links if l.get("from") == source_form]
+        return {
+            "status": "unregistered",
+            "source": source_form, "target": target_form,
+            "known_targets_for_source": known,
+            "hint": (f"{source_form} → {target_form} 未登记在 base/registry.yml:links。"
+                     + (f"该源单已登记的目标单：{known}。" if known else
+                        f"{source_form} 目前没有任何已登记的下推目标。")
+                     + "若这条转换关系在本账套确实存在，请补进 "
+                       "profiles/<租户>/profile.yml 的 links 段（业务人员可自行填写，"
+                       "见 profiles/README.md）；未登记不代表不合法，只代表无法校验。"),
+        }
+    out = {"status": "registered", "source": source_form, "target": target_form,
+           "verified": link.get("verified")}
+    if link.get("verified") == "suspect":
+        out["warning"] = ("该下推关系被标记为**存疑**，尚未在真实账套验证："
+                          + link.get("note", ""))
+    return out
+
+
 async def _post_raw(ep_key: str, form_id: str, model: dict,
                      need_update_fields: Optional[List[str]] = None,
                      need_return_fields: Optional[List[str]] = None,
@@ -1978,6 +2043,15 @@ async def _post_raw(ep_key: str, form_id: str, model: dict,
         body_obj = {"formid": form_id, "data": json.dumps(data_obj, ensure_ascii=False)}
     elif ep_key in ("push", "submit", "audit", "unaudit", "delete", "view"):
         data_obj = dict(model)
+        if ep_key == "push":
+            # 所有下推路径的唯一咽喉点（含 3 个复合工具），一处校验覆盖全部
+            # 只在此处做**阻断**；返回体里的提示由各 push 工具调 _check_push_link
+            # 自行附加（纯查表，重算一次的代价可忽略）。
+            # 不用模块级全局缓存结果——并发下推会互相串。
+            _chk = _check_push_link(form_id, str(data_obj.get("TargetFormId", "")))
+            if _STRICT_LINKS and _chk.get("status") == "unregistered":
+                raise RuntimeError(
+                    "[KINGDEE_STRICT_LINKS] 拒绝未登记的下推关系。" + _chk["hint"])
         # 💡 REMEMBER: Submit/Audit/Unaudiot/Delete 的 Ids 必须是单个字符串 {"Ids":"100"}，不是数组
         if ep_key in ("submit", "audit", "unaudit", "delete") and "Ids" in data_obj:
             ids = data_obj["Ids"]
@@ -3780,7 +3854,7 @@ async def kingdee_push_bill(params: PushDownInput) -> str:
         if params.draft_on_fail:
             push_data["IsDraftWhenSaveFail"] = "true"
         result = await _post_raw("push", params.form_id, push_data)
-        status_data = _result_status(result, "push")
+        status_data = _result_status(result, "push", link_check=_check_push_link(params.form_id, params.target_form_id))
         # 提取生成的目标单据编号
         rs = result.get("Result", result) if isinstance(result, dict) else {}
         numbers = rs.get("Numbers", [])
@@ -4109,7 +4183,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
         _record_halt(out, params.target_form_id)
         return _err(e, extra_errors=[{"step": "push", "stage_summary": out}], op="push_and_audit")
 
-    push_status = _result_status(push_result, "push")
+    push_status = _result_status(push_result, "push", link_check=_check_push_link(params.form_id, params.target_form_id))
     rs = push_result.get("Result", push_result) if isinstance(push_result, dict) else {}
     target_bill_nos = rs.get("Numbers", []) or []
     target_fids_raw = rs.get("Ids", []) or []
@@ -4334,7 +4408,7 @@ async def kingdee_create_lx_billing(params: CreateLxBillingInput) -> str:
         _record_halt(out, target_form_id)
         return _err(e, extra_errors=[{"step": "push", "stage_summary": out}], op=op_name)
 
-    push_status = _result_status(push_result, "push")
+    push_status = _result_status(push_result, "push", link_check=_check_push_link(source_form_id, target_form_id))
     rs = push_result.get("Result", push_result) if isinstance(push_result, dict) else {}
     response_status = rs.get("ResponseStatus", {}) if isinstance(rs, dict) else {}
     success_entities = response_status.get("SuccessEntitys", []) or []
@@ -6552,7 +6626,7 @@ async def kingdee_push_stock_transfer(params: PushDownInput) -> str:
         if params.draft_on_fail:
             push_data["IsDraftWhenSaveFail"] = "true"
         result = await _post_raw("push", "STK_TransferApply", push_data)
-        status_data = _result_status(result, "push")
+        status_data = _result_status(result, "push", link_check=_check_push_link("STK_TransferApply", "STK_TransferDirect"))
         rs = result.get("Result", result) if isinstance(result, dict) else {}
         numbers = rs.get("Numbers", [])
         ids = rs.get("Ids", [])
@@ -7348,7 +7422,7 @@ async def kingdee_push_production_pick(params: ProductionPickPushInput) -> str:
         if params.draft_on_fail:
             push_data["IsDraftWhenSaveFail"] = "true"
         result = await _post_raw("push", "PRD_MO", push_data)
-        status_data = _result_status(result, "push")
+        status_data = _result_status(result, "push", link_check=_check_push_link("PRD_MO", "PRD_PickMtrl"))
         if status_data.get("success"):
             status_data["next_action"] = "submit+audit"
             status_data["next_action_desc"] = (
@@ -7385,7 +7459,7 @@ async def kingdee_push_production_stock_in(params: ProductionStockInPushInput) -
         if params.draft_on_fail:
             push_data["IsDraftWhenSaveFail"] = "true"
         result = await _post_raw("push", "PRD_PickMtrl", push_data)
-        status_data = _result_status(result, "push")
+        status_data = _result_status(result, "push", link_check=_check_push_link("PRD_PickMtrl", "PRD_Instock"))
         if status_data.get("success"):
             status_data["next_action"] = "submit+audit"
             status_data["next_action_desc"] = (

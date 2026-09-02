@@ -1,0 +1,94 @@
+name: Ontology & Atomicity Check
+
+# 本体一致性 + 操作原子化审计 + 收敛率 + 文档新鲜度。
+# 与既有的 harness-check.yml 互补：那条只跑 tests/test_server.py 一个文件，
+# 这条跑全量测试并把几项"会随时间悄悄失效"的保护做成硬门禁。
+
+on:
+  push:
+    paths:
+      - 'base/**'
+      - 'harness/**'
+      - 'profiles/**'
+      - 'src/**/*.py'
+      - 'tests/**/*.py'
+      - 'tools/ontology/**'
+      - 'wikiskill/**'
+      - 'pyproject.toml'
+      - '.github/workflows/ontology-check.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -U pip
+          # 上游代码依赖 mcp v1 的 FastMCP，v2 改名了会直接 import 失败
+          pip install -e ".[test]" "mcp<2" PyYAML
+
+      - name: 全量测试
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/ -q
+
+      # ── 以下每一项都是"会随时间悄悄失效"的保护，故做成硬门禁 ──
+
+      - name: 操作原子化审计（不允许 error 级发现）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python tools/ontology/audit_atomicity.py
+
+      - name: 约束层覆盖率（新增写工具必须登记）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/test_harness_coverage.py -q
+
+      - name: 只读收敛率（不许跌破 94%，未收敛必须写明理由）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          python tools/ontology/measure_convergence.py
+          python -m pytest tests/test_readonly_convergence.py -q
+
+      - name: 租户配置校验
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m base.validate_profile example-tenant
+
+      - name: 本体实例可抽取（AST 静态分析，不连账套）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python tools/ontology/extract_ontology.py
+
+      - name: 底座工具面 token 成本
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+          KINGDEE_PASSWORD: '-'
+        run: python tools/ontology/measure_tool_surface.py --both
+
+      # README 里的数字（token 账、覆盖率、测试数）是实测生成的，
+      # 所以加了测试或改了注册表之后需要重跑 update_readme.py 再提交。
+      # 这条失败不代表代码有问题，只代表 README 落后于代码。
+      - name: README 数字与代码一致
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+          KINGDEE_PASSWORD: '-'
+        run: python tools/ontology/update_readme.py --check
+
+      - name: WikiSkill 自优化链路可运行
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          python tools/ontology/test_operation_audit.py
+          python -m wikiskill.retro --report \
+            --audit docs/ontology/samples/operation_audit_record.sample.jsonl
