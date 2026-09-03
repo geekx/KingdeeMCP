@@ -634,7 +634,7 @@ def _err(e: Exception, extra_errors: list = None, op: str = "") -> str:
     # 失败追溯：记录到 failure_log.jsonl（记忆层核心）
     if op and extra:
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log(op, result)
         except Exception:
             pass  # 不因日志记录失败影响正常返回
@@ -1963,11 +1963,6 @@ _STRICT_LINKS = os.environ.get("KINGDEE_STRICT_LINKS", "").lower() in ("1", "tru
 def _check_push_link(source_form: str, target_form: str) -> dict:
     """对照底座链接表检查一条下推关系。底座不可用时静默跳过（返回 skipped）。"""
     try:
-        import sys as _sys
-        from pathlib import Path as _Path
-        root = _Path(__file__).resolve().parents[2]
-        if str(root) not in _sys.path:
-            _sys.path.insert(0, str(root))
         from kingdee_ontology.base.ontology import load as _load
         onto = _load(tenant=os.environ.get("KINGDEE_TENANT", ""))
     except Exception:
@@ -3960,9 +3955,6 @@ def _record_halt(out: dict, form_id: str, produced: list[str] | None = None) -> 
     #    "有写操作已生效、但整条链没走到终态" —— 只记失败步会让它判不出来。
     #    所有步骤共享同一 trace_id，事后才能拼回一次完整的业务操作。
     try:
-        import sys as _sys
-        from pathlib import Path as _Path
-        _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "tools" / "ontology"))
         from kingdee_ontology.operation_audit import audit_recorder
 
         _STATE_AFTER = {"save": "Z:暂存", "push": "Z:暂存",
@@ -4056,7 +4048,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
         out["recovery_hint"] = "Save 失败：检查 errors[].matched.suggestion；修正 model 后重试。"
         # 失败日志只在 composite 层记一次
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
@@ -4089,7 +4081,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             f"修正后调用 kingdee_submit_bills(form_id=\"{params.form_id}\", bill_ids=[\"{fid}\"]) 重试。"
         )
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
@@ -4121,7 +4113,7 @@ async def kingdee_create_and_audit(params: CreateAndAuditInput) -> str:
             f"检查 errors[].matched.suggestion；修正后调用 kingdee_audit_bills 重试。"
         )
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("create_and_audit", out)
         except Exception:
             pass
@@ -4206,7 +4198,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             "转换规则不匹配、源单未审核。"
         )
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass
@@ -4251,7 +4243,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             f"目标草稿已生成 fids={target_fids}。Submit 部分或全部失败：检查 failed[].errors。"
         )
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass
@@ -4282,7 +4274,7 @@ async def kingdee_push_and_audit(params: PushAndAuditInput) -> str:
             f"修正后调用 kingdee_audit_bills 重试。"
         )
         try:
-            from scripts.failure_log import FailureLogger
+            from kingdee_ontology.failure_log import FailureLogger
             FailureLogger().log("push_and_audit", out)
         except Exception:
             pass

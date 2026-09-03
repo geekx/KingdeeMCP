@@ -22,6 +22,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "src" / "kingdee_ontology"
+# wheel 里装了**两个**包。只扫其中一个，另一个的同类缺陷就照样发得出去——
+# 这正是漏掉的：kingdee_mcp/server.py 里 7 处 `from scripts.failure_log import …`
+# 全在 try/except: pass 里，装完之后被文档称作"记忆层核心"的失败日志静默失效，
+# 谁也不会发现。
+SHIPPED = [PKG, ROOT / "src" / "kingdee_mcp"]
 
 # 声明在 pyproject 里的第三方依赖（含可选）
 DECLARED = {"mcp", "httpx", "pydantic", "yaml", "pyodbc", "pytest"}
@@ -58,9 +63,10 @@ class TestNoUnshippableImports:
         """
         allowed = _stdlib() | DECLARED | SIBLINGS
         bad: list[str] = []
-        for f in sorted(PKG.rglob("*.py")):
-            for mod in _top_level_imports(f) - allowed:
-                bad.append(f"{f.relative_to(ROOT)} → import {mod}")
+        for pkg in SHIPPED:
+            for f in sorted(pkg.rglob("*.py")):
+                for mod in _top_level_imports(f) - allowed:
+                    bad.append(f"{f.relative_to(ROOT)} → import {mod}")
         assert not bad, (
             "这些导入装成 wheel 之后会 ModuleNotFoundError（测试里能过是因为 "
             "conftest 补了 sys.path）：\n  " + "\n  ".join(bad))
@@ -71,10 +77,38 @@ class TestNoUnshippableImports:
         往 sys.path 里塞仓库相对路径，是"只在源码树里能跑"的典型写法：
         装进 site-packages 后那些路径根本不存在，且会静默地什么都不做。
         """
-        bad = [str(f.relative_to(ROOT)) for f in PKG.rglob("*.py")
+        bad = [str(f.relative_to(ROOT)) for pkg in SHIPPED
+               for f in pkg.rglob("*.py")
                if "sys.path.insert" in f.read_text(encoding="utf-8")
                or "sys.path.append" in f.read_text(encoding="utf-8")]
         assert not bad, f"包内不该改 sys.path：{bad}"
+
+    def test_no_silently_swallowed_unshippable_imports(self):
+        """`try: import 仓库内模块 / except: pass` 是最难发现的一种坏法。
+
+        它不报错、不留痕，只是让一个功能悄悄不工作。上面那条按顶层导入扫，
+        照样能覆盖到（函数体内的 ImportFrom 也在 AST 里），这条把话说清楚：
+        用 try/except 兜住并不能让一个装不到的模块变得可用。
+        """
+        allowed = _stdlib() | DECLARED | SIBLINGS
+        bad: list[str] = []
+        for pkg in SHIPPED:
+            for f in sorted(pkg.rglob("*.py")):
+                tree = ast.parse(f.read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Try):
+                        continue
+                    for inner in ast.walk(node):
+                        mods = set()
+                        if isinstance(inner, ast.Import):
+                            mods = {a.name.split(".")[0] for a in inner.names}
+                        elif isinstance(inner, ast.ImportFrom) and not inner.level and inner.module:
+                            mods = {inner.module.split(".")[0]}
+                        for m in mods - allowed:
+                            bad.append(f"{f.relative_to(ROOT)}:{inner.lineno} → {m}")
+        assert not bad, (
+            "这些导入装成 wheel 之后必失败，且被 except 吞掉——功能会静默不工作：\n  "
+            + "\n  ".join(bad))
 
     def test_registry_ships_with_the_package(self):
         """注册表是数据不是代码，但服务端没它跑不起来。"""
