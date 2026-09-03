@@ -252,3 +252,59 @@ class TestProfileValidation:
         assert any("不适用于" in e for e in errs)
         assert any("不认识的动作" in e for e in errs)
         ont.load.cache_clear()
+
+
+class TestActAdvisories:
+    """AIP-04/05 的忠告要真的从 kd_act 传出来——这是它唯一的价值所在。
+
+    Dispatcher.act() 会把判断层的忠告塞进 out["advisories"]，但这条线此前
+    没有任何测试覆盖：如果哪次重构把它漏掉（比如换掉 decide() 的调用、
+    或者忘了把 advice 接进 out），不会有任何测试变红，advisories 就悄悄
+    从返回体里消失了——和这个仓库这一路揪出来的其它"静默不工作"是同一个病。
+    """
+
+    @pytest.mark.asyncio
+    async def test_destructive_verb_carries_no_compensation_advisory(self, base_o):
+        """delete 无逆动词也无补偿，advisories 必须说清楚、且不能拦。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
+        out = await d.act("delete", "采购订单", ["CGDD001"], current_state="Z:暂存")
+        assert out["success"] is True, "忠告不该阻断执行"
+        assert "advisories" in out, "delete 是 destructive，AIP-04 必须给出忠告"
+        rules = {a["rule"] for a in out["advisories"]}
+        assert "AIP-04" in rules
+        aip04 = next(a for a in out["advisories"] if a["rule"] == "AIP-04")
+        assert aip04["severity"] == "warn"
+        assert "退不回来" in aip04["fix"]
+
+    @pytest.mark.asyncio
+    async def test_operation_code_advisory_when_omitted(self, base_o):
+        """close 走金蝶「操作」接口，没给 operation 时要提醒会用默认值。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
+        out = await d.act("close", "采购订单", ["CGDD001"], current_state="C:已审核")
+        assert out["success"] is True
+        aip05 = next((a for a in out.get("advisories", []) if a["rule"] == "AIP-05"), None)
+        assert aip05 is not None, "close 未给 operation，AIP-05 必须提醒"
+        assert "操作编码" in aip05["message"] or "operation" in aip05["message"]
+
+    @pytest.mark.asyncio
+    async def test_operation_code_advisory_silent_when_given(self, base_o):
+        """给了 operation 就不该再提醒——忠告是给缺口用的，不是噪音。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
+        out = await d.act("close", "采购订单", ["CGDD001"], current_state="C:已审核",
+                          operation="YLBillClose")
+        aip05 = [a for a in out.get("advisories", []) if a["rule"] == "AIP-05"]
+        assert not aip05, "给了 operation 还在提醒，会把有用的信号淹没在噪音里"
+
+    @pytest.mark.asyncio
+    async def test_reversible_verb_has_no_advisories(self, base_o):
+        """audit 有逆动词、不需要操作编码——不该无中生有一条忠告。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
+        out = await d.act("audit", "采购订单", ["CGDD001"], current_state="B:审核中")
+        assert out.get("advisories", []) == []
+
+    @pytest.mark.asyncio
+    async def test_advisories_key_absent_when_empty(self, base_o):
+        """没有忠告时干脆不带这个字段，别让调用方去分辨 [] 和"没有意见"。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
+        out = await d.act("audit", "采购订单", ["CGDD001"], current_state="B:审核中")
+        assert "advisories" not in out
