@@ -8,6 +8,27 @@
 
 ---
 
+## [Unreleased]
+
+### 修复：AIP-04/05 的忠告生成了，但没人知道要看它
+
+`Dispatcher.act()` 早就把判断层的忠告塞进 `out["advisories"]`，PR 里也写了
+"经 `Dispatcher.act` 的 `advisories` 交出"——这句话在代码层面是真的，但
+**从没有任何文档告诉 Claude 要去读它**：`kd_act` 的工具说明没提，`SKILL.md`
+没提，也没有一条测试验证这个字段真的会出现在返回体里。于是这个功能对使用它
+的 agent 是不可见的——写出来了，但没人会用。
+
+同一个病，第三次犯：装完丢失的失败日志、说反话的审计器，现在是没人知道该看
+的忠告字段。都是"代码本身没问题，但外部没人能发现它在工作"。
+
+新增 `tests/test_base_ontology.py::TestActAdvisories` 5 条集成测试，端到端
+验证 `advisories` 字段：destructive 动词（如 delete）必带 AIP-04，走「操作」
+接口且未给 `operation` 的动词（如 close）必带 AIP-05，给了就不再提醒，
+无忠告时字段整个不存在（不必分辨"空数组"和"没有意见"）。
+
+`kd_act` 的工具说明与 `SKILL.md` 都补上了：有 `advisories` 时先念给用户听、
+再执行，不要静默略过。
+
 ## [0.3.0]
 
 ### 新增：AIP Logic 判断层（`aip/`）

@@ -129,6 +129,12 @@ async def kd_act(params: ActInput) -> str:
     执行前自动校验：动词是否适用于该单据、当前状态是否满足前置条件。
     不适用时在发请求前就拦下，并给出该单据可用的动词。
 
+    有 advisories 时先念给用户听、再执行，不要静默略过：
+      AIP-04（不可逆）  这一步没有逆动词，做完退不回来——执行前必须让用户点头。
+      AIP-05（操作编码）走金蝶「操作」接口的动词（close/void/forbid/…），
+                        二开单未给 operation 时会用默认值，报错多半出在这。
+    没有忠告时这个字段不存在——不必检查是否为空数组。
+
     dry_run=True + verb='save' 只做保存前校验不写入，用于先确认字段是否齐全。"""
     return _fmt(await _d().act(params.verb, params.noun, params.targets,
                                model=params.model, current_state=params.current_state,
