@@ -114,6 +114,52 @@ async def main():
         n3 = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
         res['delete_syncs'] = n3 == n2 - 1
 
+        # ── 起点：不该只有销售订单 ──────────────────────────────
+        res['start_options'] = await pg.eval_on_selector_all(
+            '#startnouns option', 'e=>e.map(o=>o.value)')
+        res['start_chips'] = await pg.eval_on_selector_all(
+            '#startchips [data-start]', 'e=>e.map(b=>b.dataset.start)')
+
+        # 换起点：点一个非销售订单的常用起点
+        other = next(c for c in res['start_chips'] if c != 'SAL_SaleOrder')
+        await pg.click(f'#startchips [data-start="{other}"]')
+        await pg.wait_for_timeout(300)
+        res['switched_to'] = other
+        res['chip_pressed_after_switch'] = await pg.eval_on_selector_all(
+            '#startchips [data-start][aria-pressed="true"]', 'e=>e.map(b=>b.dataset.start)')
+        res['input_after_switch'] = await pg.eval_on_selector('#opstart', 'e=>e.value')
+        res['steps_after_switch'] = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+
+        # 撤销要真能把清掉的步骤拿回来
+        await pg.click('#startclear'); await pg.wait_for_timeout(300)
+        res['steps_after_undo'] = await pg.eval_on_selector_all('#steps .step', 'e=>e.length')
+
+        # 补全：打别名也要认（不是只认中文全名）
+        await pg.fill('#opstart', 'PUR_PurchaseOrder')
+        await pg.dispatch_event('#opstart', 'change'); await pg.wait_for_timeout(300)
+        res['resolved_by_form_id'] = await pg.eval_on_selector_all(
+            '#startchips [data-start][aria-pressed="true"]', 'e=>e.map(b=>b.dataset.start)')
+
+        # 认不出来的输入必须说清楚，而不是默默不动
+        await pg.fill('#opstart', '这不是个单据')
+        await pg.dispatch_event('#opstart', 'change'); await pg.wait_for_timeout(300)
+        res['bad_input_invalid'] = await pg.eval_on_selector(
+            '#opstart', 'e=>e.getAttribute("aria-invalid")')
+        res['bad_input_hint'] = await pg.eval_on_selector('#starthint', 'e=>e.textContent')
+
+        # 起点栏在加了一步之后不能开始说谎
+        await pg.click(f'#startchips [data-start="{other}"]')
+        await pg.wait_for_timeout(250)
+        plus = await pg.eval_on_selector_all(
+            '#cgraph g.plus[data-edge]', 'e=>e.map(g=>g.dataset.edge)')
+        edge = next((p for p in plus if p.startswith(other + '|')), None)
+        if edge:
+            await pg.click(f'#cgraph g.plus[data-edge="{edge}"]')
+            await pg.wait_for_timeout(300)
+            res['start_after_adding_step'] = await pg.eval_on_selector_all(
+                '#startchips [data-start][aria-pressed="true"]', 'e=>e.map(b=>b.dataset.start)')
+            res['edge_used'] = edge
+
         res['yaml'] = await pg.eval_on_selector('#yaml', 'e=>e.textContent')
         res['errors'] = [e for e in errs if 'ERR_CONNECTION' not in e]
         await b.close()
@@ -224,3 +270,54 @@ class TestGraphAndFormCoexist:
         errs, _ = vp.validate("_ui")
         ont.load.cache_clear()
         assert errs == [], f"编排器产出的配置过不了校验：{errs}"
+
+
+class TestEntryPointIsNotOnlySalesOrder:
+    """起点不该只有销售订单。
+
+    后端从来没这个限制——示例租户里「采购收货入库」就起于采购订单。是界面把
+    一个**默认值**演成了约束：预置步骤硬编码一条 SAL_SaleOrder 的下推，而页面上
+    没有任何地方能换。默认值被当成约束，是界面在替本体说话，而且说错了。
+    """
+
+    def test_many_entry_points_are_offered(self, ui):
+        assert len(ui["start_options"]) > 20, (
+            f"可选起点只有 {len(ui['start_options'])} 个，补全列表没建起来")
+
+    def test_common_entry_points_include_more_than_sales(self, ui):
+        chips = ui["start_chips"]
+        assert len(chips) >= 3, f"常用起点太少：{chips}"
+        assert chips != ["SAL_SaleOrder"], "常用起点只有销售订单，等于没改"
+
+    def test_switching_entry_point_takes_effect(self, ui):
+        """点一个别的起点，输入框、chip、步骤都得跟着变——这正是原来做不到的事。"""
+        assert ui["chip_pressed_after_switch"] == [ui["switched_to"]], (
+            f"切到 {ui['switched_to']} 后高亮的却是 {ui['chip_pressed_after_switch']}")
+        assert ui["input_after_switch"], "切换后输入框没回填名称"
+        assert ui["steps_after_switch"] == 0, "换起点应清空原有步骤（否则两条链混在一起）"
+
+    def test_undo_restores_the_cleared_steps(self, ui):
+        """换起点会清空步骤，那就必须能撤销——静默丢掉别人的活是不可接受的。"""
+        assert ui["steps_after_undo"] > 0, "撤销没把清掉的步骤拿回来"
+
+    def test_form_id_also_resolves(self, ui):
+        """补全要认 form_id，不只认中文名。"""
+        assert ui["resolved_by_form_id"] == ["PUR_PurchaseOrder"], (
+            f"输入 form_id 没解析出来：{ui['resolved_by_form_id']}")
+
+    def test_unrecognized_input_says_so(self, ui):
+        """认不出来要说清楚。「点了没反应」比报错更难查。"""
+        assert ui["bad_input_invalid"] == "true", "无效输入没有标 aria-invalid"
+        assert "认不出" in ui["bad_input_hint"], f"没给出提示：{ui['bad_input_hint']}"
+
+    def test_start_does_not_drift_when_steps_are_added(self, ui):
+        """加了一步之后，起点仍是起点。
+
+        cSel 是「当前位置」，commitSteps() 会把它推到步骤链末端。起点栏若跟着
+        cSel 走，加一步就会显示成下游单——这是把两个概念混用的必然结果。
+        """
+        if "start_after_adding_step" not in ui:
+            pytest.skip("该起点没有可下推的边，测不了漂移")
+        assert ui["start_after_adding_step"] == [ui["switched_to"]], (
+            f"加了一步 {ui['edge_used']} 之后，起点漂成了 "
+            f"{ui['start_after_adding_step']}，应仍是 {ui['switched_to']}")

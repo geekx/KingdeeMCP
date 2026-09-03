@@ -177,6 +177,11 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
 @media (max-width:980px){.composeGrid{grid-template-columns:1fr}}
 #cgraph svg .node{cursor:pointer}
 #cgraph svg .node rect{transition:none}
+.startbar{display:flex;align-items:center;gap:9px;margin:0 0 2px}
+.startbar label{font-size:12px;color:var(--ink-2);flex:none}
+.startbar input{flex:1;max-width:420px;padding:6px 9px;border:1px solid var(--rule);
+                border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.startbar input[aria-invalid="true"]{border-color:var(--seal);background:var(--seal-soft)}
 #cpanel{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:14px 15px}
 #cpanel .opt{display:flex;align-items:center;gap:7px;margin:8px 0;font-size:12.5px}
 #cpanel select,#cpanel input{padding:5px 8px;border:1px solid var(--rule);border-radius:5px;
@@ -258,7 +263,19 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
     下面用表单加——确认、动词、守卫这些不在链上的步骤从这儿补。
     两边改的是同一个列表，YAML 也只有一份。编好贴进
     <code>profiles/&lt;租户&gt;/profile.yml</code>，之后直接说「帮我做<b id="opname-echo">销售开票</b>」。
+    <br>下面预置的是一个<b>销售订单</b>的例子——换个起点即可，采购、生产、调拨、
+    委外同样成立。
   </p>
+  <div class="startbar">
+    <label for="opstart">起点</label>
+    <input id="opstart" list="startnouns" autocomplete="off" spellcheck="false"
+           placeholder="单据名 / 编码 / 别名，如 采购订单、PUR_PurchaseOrder、采购单">
+    <datalist id="startnouns"></datalist>
+    <button class="btn ghost" id="startclear" hidden>撤销</button>
+  </div>
+  <p class="hint" id="starthint"></p>
+  <div class="chips" id="startchips"></div>
+
   <div class="eyebrow" style="margin-bottom:8px">① 图：顺着下推链往下走</div>
   <div class="composeGrid">
     <div class="graphwrap" id="cgraph"></div>
@@ -609,6 +626,119 @@ function syncObjectOptions() {
   if (ok.some(t => t.form_id === keep)) sel.value = keep;   // 仍适用就保住原选择
 }
 
+/* ── 起点：不是只有销售订单 ────────────────────────────────
+   预置的例子起于销售订单，于是它看着像**唯一**入口——可后端从来没这个限制
+   （示例租户里「采购收货入库」就起于采购订单）。一个默认值被当成约束，
+   是界面在替本体说话，而且说错了。
+
+   85 个名词铺成下拉太长，所以用补全输入框：中文名、form_id、别名都能命中；
+   下面再摆一排常用起点，省得不知道能填什么。 */
+function entryPoints() {
+  const out = D.links.reduce((m, l) => (m[l.from] = (m[l.from] || 0) + 1, m), {});
+  return D.types
+    .map(t => ({t, pushes: out[t.form_id] || 0,
+                writes: (t.actions || []).length}))
+    // 能起一件多步的事，要么能下推出下游单，要么本身有写动作可做
+    .filter(x => x.pushes || x.writes)
+    .sort((a, b) => b.pushes - a.pushes || a.t.zh.localeCompare(b.t.zh, 'zh'));
+}
+
+/* 认中文名、form_id、别名；先精确、再前缀、最后包含。
+   顺序很重要：「销售订单」不该被「销售订单变更单」这种更长的名字抢先。 */
+function resolveNoun(text) {
+  const q = (text || '').trim();
+  if (!q) return null;
+  const ok = entryPoints().map(x => x.t);
+  const norm = s => (s || '').toLowerCase();
+  const cand = t => [t.form_id, t.zh, ...(t.alias || [])];
+  return ok.find(t => cand(t).some(c => norm(c) === norm(q)))
+      || ok.find(t => cand(t).some(c => norm(c).startsWith(norm(q))))
+      || ok.find(t => cand(t).some(c => norm(c).includes(norm(q))))
+      || null;
+}
+
+let _stepsBeforeStart = null;      // 换起点会清空步骤，留一手给「撤销」
+
+/* startNoun 与 cSel 不是一回事，混用会让起点栏在加了一步之后就开始说谎：
+     cSel       当前位置——commitSteps() 会把它推到步骤链的末端
+     startNoun  这件事从哪张单开始——加多少步都不该变
+   有步骤时以步骤为准（步骤才是事实），没步骤时才用显式选的那个。 */
+let startNoun = null;
+function derivedStart() {
+  for (const s of steps) {
+    if (s.做 === '下推') return s.从;
+    if (s.对象) return s.对象;
+  }
+  return startNoun;
+}
+
+function renderStartBar() {
+  const eps = entryPoints();
+  document.getElementById('startnouns').innerHTML = eps.map(x =>
+    `<option value="${esc(x.t.zh)}">${esc(x.t.form_id)}</option>`).join('');
+  // 常用起点＝下推目标最多的那几个。它们是链头，最可能是一件事的开头。
+  const cur = derivedStart();
+  document.getElementById('startchips').innerHTML =
+    eps.filter(x => x.pushes).slice(0, 8).map(x =>
+      `<button class="chip" data-start="${x.t.form_id}"
+         aria-pressed="${x.t.form_id === cur}">${esc(x.t.zh)}</button>`).join('')
+    + `<span class="hint" style="align-self:center;margin-left:4px">共 ${eps.length} 个可选起点</span>`;
+  syncStartHint();
+}
+
+function syncStartHint() {
+  const el = document.getElementById('starthint');
+  const inp = document.getElementById('opstart');
+  const cur = derivedStart();
+  const t = cur && D.types.find(x => x.form_id === cur);
+  if (!t) { el.textContent = ''; return; }
+  if (document.activeElement !== inp) inp.value = t.zh;
+  const pushes = D.links.filter(l => l.from === t.form_id);
+  el.innerHTML = `<b>${esc(t.zh)}</b> <code>${esc(t.form_id)}</code>　`
+    + (pushes.length
+        ? `可下推 ${pushes.length} 种：${pushes.map(l => esc(byId[l.to]?.zh || l.to)).join('、')}`
+        : '没有已登记的下推目标——只能对它本身做动词步')
+    + `　·　${(t.actions || []).length} 个写动作`;
+  inp.setAttribute('aria-invalid', 'false');
+}
+
+function setStart(formId, {clearSteps = true} = {}) {
+  startNoun = formId;
+  cSel = formId;
+  const inp = document.getElementById('opstart');
+  const t = D.types.find(x => x.form_id === formId);
+  if (t) inp.value = t.zh;
+  if (clearSteps && steps.length) {
+    _stepsBeforeStart = steps.slice();
+    steps = [];
+    document.getElementById('startclear').hidden = false;
+  }
+  renderStartBar();
+  renderComposeGraph(); renderComposePanel(); renderPreview();
+}
+
+document.getElementById('opstart').addEventListener('change', e => {
+  const t = resolveNoun(e.target.value);
+  if (!t) {
+    // 认不出来就说清楚，别默默不动——「点了没反应」比报错更难查
+    e.target.setAttribute('aria-invalid', 'true');
+    document.getElementById('starthint').textContent =
+      `认不出「${e.target.value}」。可用中文名、form_id 或别名；下面一排是常用起点。`;
+    return;
+  }
+  setStart(t.form_id);
+});
+document.getElementById('startchips').addEventListener('click', e => {
+  const b = e.target.closest('[data-start]');
+  if (b) setStart(b.dataset.start);
+});
+document.getElementById('startclear').onclick = () => {
+  if (!_stepsBeforeStart) return;
+  steps = _stepsBeforeStart; _stepsBeforeStart = null;
+  document.getElementById('startclear').hidden = true;
+  commitSteps();
+};
+
 /* ── 图与表单是同一份 steps 的两个入口，不是两套东西 ──────────
    图上点适合"顺着链往下走"，表单适合补一条链上没有的（确认、动词、
    跨账套的活）。谁改完都走 commitSteps()，两边才不会各说各话。 */
@@ -626,6 +756,7 @@ function commitSteps() {
   renderComposeGraph();
   // 选中点没变就别重建面板：正在输入的守卫条件、授权角色会被一起清掉
   if (moved) renderComposePanel();
+  renderStartBar();
   renderPreview();
 }
 
@@ -846,7 +977,9 @@ document.querySelector('.tabs').onclick = e => {
   ['obj', 'graph', 'compose'].forEach(v =>
     document.getElementById('view-' + v).hidden = v !== b.dataset.view);
   if (b.dataset.view === 'graph') renderGraph();
-  if (b.dataset.view === 'compose') { renderCompose(); renderComposeGraph(); renderComposePanel(); }
+  if (b.dataset.view === 'compose') {
+    renderCompose(); renderStartBar(); renderComposeGraph(); renderComposePanel();
+  }
 };
 
 renderList(); renderCenter(); renderRight();
