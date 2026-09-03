@@ -4,7 +4,136 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 当前 PyPI 版本：`0.2.1`（见 `pyproject.toml`）。本文件按功能里程碑汇总，未单独打 git tag。
+> 当前 PyPI 版本：`0.3.0`（见 `pyproject.toml`）。本文件按功能里程碑汇总，未单独打 git tag。
+
+---
+
+## [0.3.0]
+
+### 新增：AIP Logic 判断层（`aip/`）
+
+「这一步能不能做」此前有四种答法，各长在一处（`check_*` 抛异常、
+`availability()` 返回 dict、`validate_profile` 追加 errs/warns、saga 守卫
+又一套）。四份实现回答同一个问题，于是可以彼此矛盾而没人发现。
+
+现收拢成声明式、以本体为参数的纯函数：
+
+- **一次给全部理由，不短路**——三个前置条件本来是三个来回，现在是一个。
+- **「不知道」不等于「可以」**——`Decision.undetermined` 与 `allowed` 分开，
+  事实不全时 `allowed` 为 `False`。旧 `availability()` 在状态未知时返回
+  `enabled: True`，只读该字段的调用方会直接走下去。
+- **纯函数**，不发请求、不读文件、不看时钟，故可独立运行。
+
+新增规则 AIP-04（不可逆需人工确认）、AIP-05（二开单操作编码），
+经 `Dispatcher.act` 的 `advisories` 交出。不新增 MCP 工具：
+`kd_describe(what='logic')`。
+
+### 新增：`kd-logic`，判断层可脱离模型独立运行
+
+冷启动约 130 ms，零 token。退出码 0/1/2/3 可直接用于脚本编排。
+`kd-logic serve` 可挂成本地 HTTP 端点（仅监听回环——判断层不做鉴权）。
+
+### 破坏性变更：包结构
+
+`base/` `aip/` `saga/` `pipeline/` `indexlayer/` `harness/` `wikiskill/`
+由仓库顶层目录收进 `src/kingdee_ontology/` 命名空间。
+
+**原因**：这些包此前**根本没被打进 wheel**（`packages` 只列了
+`src/kingdee_mcp`），`pip install` 装不到；而且 `base`、`pipeline` 这类
+名字也不能就这么上 PyPI，会和别的包撞名。
+
+- `from base.ontology import …` → `from kingdee_ontology.base.ontology import …`
+- `python -m base.server` → `python -m kingdee_ontology.base.server`
+  （或直接用新入口 `kingdee-ontology`）
+- `operation_audit` 由 `tools/ontology/` 移入包内——它被 `Dispatcher` 直接
+  导入，是运行期代码，此前只靠 conftest 补 `sys.path` 才导得到。
+
+### 变更：`pyodbc` 移出必装项
+
+只被 4 个可选的 SQL Server 目录探查工具用到，却是全链路里唯一需要现场
+编译的依赖。改为 `pip install kingdee-mcp[sql]`。导入处早已惰性并带安装
+提示，不影响任何现有调用。
+
+### 新增：离线包（内网／隔离网段）
+
+金蝶云星空常部署在开不了外网的机器上，所以离线安装是刚需而非锦上添花。
+`python3 tools/package/build_offline.py` 造两种产物：
+
+- **`kd-logic.pyz`**（157 KB，单文件，**不用装**）——自带 PyYAML 纯 Python
+  实现与本体注册表，在连 PyYAML 都没有的解释器上照样跑。
+- **`wheelhouse/`**（39 个 wheel + 安装脚本）——`pip install --no-index` 装全套。
+  认平台，可 `--platform win_amd64 --python-version 3.11` 跨平台造。
+
+`MANIFEST.json` 带每个文件的 SHA256：离线传输靠 U 盘和邮件附件，传坏了要能发现。
+
+打 tag 时由 `.github/workflows/release-offline.yml` 自动造好挂到 Release——
+内网机器连 clone 都做不到，不能要求对方自己构建。
+
+造这个包时踩到并修掉的三处：
+
+- `zipapp` 的 `main=` 生成的入口是 `cli.main()`，**返回值被丢掉，退出码恒为 0**
+  ——于是「不可以」和「事实不全」都被当成「可以」，恰好是最坏的坏法。
+  改为自己写 `__main__.py`。
+- 注册表原用 `Path.read_text` 读，打进 zip 后包目录不是真实目录，直接失败。
+  改用 `importlib.resources`（两种情形都认），文件系统只作兜底。
+- 构建时拒绝任何 `.so`/`.pyd`：zipimport 加载不了，混进去只会在没网的
+  那台机器前面才炸。
+
+### 修复：编排的起点不再只有销售订单
+
+后端从来没这个限制——示例租户里「采购收货入库」就起于采购订单。是界面把一个
+**默认值**演成了约束：预置步骤里硬编码一条 `SAL_SaleOrder` 的下推，而页面上
+没有任何地方能换起点。
+
+新增「起点」控件：补全输入框（认中文名、`form_id`、别名，56 个可选）＋
+一排常用起点 chips（按可下推目标数排序，链头最可能是一件事的开头）。
+换起点会清空原有步骤——两条链混在一起产出的配置过不了校验——但**可撤销**，
+静默丢掉别人的活是不可接受的。认不出的输入会明确报错，而不是默默不动。
+
+一处概念分家：`cSel`（当前位置，`commitSteps()` 会把它推到步骤链末端）与
+`startNoun`（这件事从哪张单开始，加多少步都不变）此前是同一个变量。起点栏若
+跟着 `cSel` 走，加一步就会显示成下游单。回归测试用变异验证过：退回旧语义后
+那条测试确实失败。
+
+### 修复：装完之后失败日志静默失效
+
+`src/kingdee_mcp/server.py` 里 7 处 `from scripts.failure_log import FailureLogger`
+全在 `try/except: pass` 里。`scripts/` 不在 wheel 里，于是**每一个 pip 安装的部署**
+中，被文档称作「记忆层核心」的失败日志都悄悄不工作——不报错、不留痕，谁也不会发现。
+
+`failure_log.py` 只依赖标准库、且被服务端在运行期导入，故移入
+`kingdee_ontology/failure_log.py`。同时清掉 `server.py` 里两处早已失效的
+`sys.path.insert`（绝对导入之后它们什么也不做，装成 wheel 后指向的目录压根不存在）。
+
+**这是打包守卫自己的洞**：wheel 里装了两个包，守卫只扫了 `kingdee_ontology`。
+现已扫描全部已交付的包，并新增一条专门查 `try/except` 里的不可交付导入——
+用 except 兜住并不能让一个装不到的模块变得可用，只会让失效变得更难发现。
+两种形态都验过：把导入改回 `scripts.` 时守卫确实报错。
+
+### 修复：审计器 AT-07 说了一件与代码相反的事
+
+AT-07 是**无条件**发出的，文案写死「legacy 的 5 个 push 工具尚未接入，仍无法校验
+某条下推是否合法」。可它们早就接上了：`_post_raw` 的 push 分支是所有下推路径的
+唯一咽喉点，在那里查注册表，并在 `KINGDEE_STRICT_LINKS=1` 时阻断；另有 6 个工具
+在返回体里附带链接状态。
+
+一条与代码相反的审计发现比不报更糟——它教人忽略审计输出。这已是第二次
+（前一次是 F-1，记在 `04-audit-trail.md`），病根相同：**断言了一件没去查的事**。
+
+现改为去 AST 里核实接线，并如实报告真正剩下的事实：默认只提示、不阻断
+（这是刻意的——未登记只说明本表不全，不代表该转换关系不存在，贸然阻断会挡掉
+二开账套里真实可用的下推）。
+
+新增 `tests/test_auditor_accuracy.py`：不看措辞，只做变异测试——把咽喉点的查表
+拆掉、把严格开关去掉，AT-07 的结论必须跟着升级为 warning。结论不随代码变的检查项，
+不是审计，是背书。
+
+### 新增：打包保护（`tests/test_packaging.py`）
+
+打包缺陷对普通测试是隐形的——conftest 补了 `sys.path`，于是「只在源码树
+里导得到」的模块照样过测试，装成 wheel 才 `ModuleNotFoundError`。
+现分两层守：静态检查（导入来源、`sys.path` 补丁、判断层依赖闭包）+
+真建 wheel 真装进干净 venv 真跑。两层都进了 CI。
 
 ---
 

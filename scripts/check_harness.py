@@ -32,7 +32,7 @@ from datetime import datetime
 # 添加项目路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from harness.rules import OpNode, validate_operation_chain, HARNESS_RULES
+from kingdee_ontology.harness.rules import OpNode, validate_operation_chain, HARNESS_RULES
 
 
 def load_trace(source: str) -> list[OpNode]:

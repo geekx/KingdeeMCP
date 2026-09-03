@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "2026-09-02",
+  "entries": [
+    {
+      "id": "f1a681b65348",
+      "kind": "link_filter_learned",
+      "title": "PUR_PurchaseOrder → STK_InStock 的关联字段探测为 FSourceBillNo",
+      "detail": "用 FSourceBillNo='CGDD000231' 查到了下游单据。",
+      "suggestion": "人眼核对后，在 profiles/<租户>/profile.yml 的 links 里给 {from: PUR_PurchaseOrder, to: STK_InStock} 加 link_filter: \"FSourceBillNo='{bill_no}'\"，此后不必再逐个试。",
+      "occurrences": 1,
+      "days": [
+        "2026-09-02"
+      ],
+      "first_seen": "2026-09-02",
+      "last_seen": "2026-09-02",
+      "evidence": [
+        {
+          "from": "PUR_PurchaseOrder",
+          "to": "STK_InStock",
+          "filter": "FSourceBillNo='CGDD000231'"
+        }
+      ],
+      "status": "open",
+      "note": "",
+      "schema_version": "1.0",
+      "confidence": "noise"
+    }
+  ]
+}

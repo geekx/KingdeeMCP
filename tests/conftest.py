@@ -26,12 +26,12 @@ os.environ.setdefault("KINGDEE_API_INVENTORY_JSON", str(
 def _isolate_failure_log(tmp_path, monkeypatch):
     """把失败日志重定向到临时目录。
 
-    scripts/failure_log.py 默认写 examples/failure_log.jsonl，而那是一份被 git
+    kingdee_ontology/failure_log.py 默认写 examples/failure_log.jsonl，而那是一份被 git
     追踪的示例数据——跑一次测试就会往里追加，污染工作区、并可能被误提交。
     """
     monkeypatch.setenv("KINGDEE_FAILURE_LOG", str(tmp_path / "failure_log.jsonl"))
     try:
-        import scripts.failure_log as fl
+        import kingdee_ontology.failure_log as fl
         monkeypatch.setattr(fl, "FAILURE_LOG_PATH", str(tmp_path / "failure_log.jsonl"))
     except Exception:
         pass

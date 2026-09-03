@@ -7,16 +7,17 @@
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "ontology"))
-
-from base.objects import ObjectModel                            # noqa: E402
-from base.ontology import Ontology, OntologyError, load        # noqa: E402
-from base.transport import KingdeeTransport, Transport         # noqa: E402
-from operation_audit import audit_recorder                     # noqa: E402
+from kingdee_ontology.base.objects import ObjectModel                            # noqa: E402
+from kingdee_ontology.indexlayer.store import ObjectIndex                        # noqa: E402
+from kingdee_ontology.pipeline.run import Pipeline                               # noqa: E402
+from kingdee_ontology.saga.engine import SagaEngine                              # noqa: E402
+from kingdee_ontology.saga.executor import make_executor                         # noqa: E402
+from kingdee_ontology.saga.model import RunStore, SagaRun                        # noqa: E402
+from kingdee_ontology.base.ontology import Ontology, OntologyError, load        # noqa: E402
+from kingdee_ontology.base.transport import KingdeeTransport, Transport         # noqa: E402
+from kingdee_ontology.operation_audit import audit_recorder                     # noqa: E402
 
 # ExecuteOperation 的操作编码。随表单而异时由调用方显式传 operation 覆盖。
 _OP_NUMBER = {"void": "Cancel", "close": "BillClose", "unclose": "UnBillClose",
@@ -82,9 +83,18 @@ def _ok(result: Any) -> tuple[bool, list]:
 class Dispatcher:
     def __init__(self, ontology: Optional[Ontology] = None,
                  transport: Optional[Transport] = None,
-                 actor: str = "unknown"):
+                 actor: str = "unknown", tenant: str = "",
+                 index: Optional[ObjectIndex] = None):
         self.o = ontology or load()
         self.t = transport or KingdeeTransport()
+        self.tenant = tenant
+        # 数据加工层：解析 + 标准化 + 血缘 + 出处。查询结果都过这条管道，
+        # 不再各处自己拆 JSON——那正是字段名和状态码乱掉的来源。
+        self.pipe = Pipeline(self.o, tenant=tenant)
+        # Funnel 索引层：可选。不给就不物化，查询照常工作。
+        self.index = index
+        # Saga 引擎：多扣扳机组的执行、逐步授权、逆序补偿。
+        self.saga = SagaEngine(self.o, RunStore(), actor=actor)
         self.actor = actor
         self.m = ObjectModel(self.o)
         # 业务操作执行期间共享的审计上下文：让一次操作的所有步骤共用同一 trace_id。
@@ -115,6 +125,12 @@ class Dispatcher:
             raise OntologyError(f"{verb} 是只读动词，请用 kd_query / kd_read。")
         warn = self.o.check_state(verb, current_state)
 
+        # 判断层的忠告（AIP-04 不可逆 / AIP-05 需操作编码）。这些不阻断，
+        # 但要随结果一起交出去：二开环境里最常见的一类"参数都对却报错"
+        # 就出在操作编码上，事前一句提醒远好过事后翻日志。
+        advice = self.o.decide(v.name, n.form_id, state=current_state,
+                               params={"operation": operation} if operation else {})
+
         out: dict[str, Any] = {
             "verb": v.name, "noun": n.form_id,
             # 契约随结果一起返回：调用方不必猜这次批量是不是原子的（修 A-2）
@@ -125,6 +141,9 @@ class Dispatcher:
         }
         if warn:
             out["warning"] = warn
+        notes = [r.to_dict() for r in advice.reasons if r.rule.startswith("AIP-")]
+        if notes:
+            out["advisories"] = notes
 
         ctx = (_Reuse(self._op_ctx) if self._op_ctx is not None
                else audit_recorder.operation(f"kd_act:{v.name}", actor=self.actor,
@@ -140,6 +159,15 @@ class Dispatcher:
                 await self._one(op, v, n, ",".join(targets),
                                 {"Ids": ",".join(targets)}, out, current_state,
                                 operation=operation, batch_targets=targets)
+
+        # Action 闭环：写操作之后索引里的这些对象就不可信了，标脏。
+        # 不自动回源刷新——那会让每次写都多一轮往返；如实标脏，让检索方决定。
+        if self.index is not None and out["succeeded"]:
+            marked = self.index.mark_stale(n.form_id, out["succeeded"],
+                                           f"{v.name} 执行后")
+            if marked:
+                out["index_stale"] = {"noun": n.form_id, "marked": marked,
+                                      "note": "索引中这些对象已标脏，检索会如实告知"}
 
         n_fail = len(out["failed"])
         out["success"] = n_fail == 0
@@ -258,12 +286,34 @@ class Dispatcher:
         _, n = self.o.check_verb_applies("query", refs[0])
         fk = fields or n.default_fields
         if n.system_endpoint:
-            rows = await self.t.system_query(n.system_endpoint, n.form_id, fk, filter_string, top)
+            raw = await self.t.system_query(n.system_endpoint, n.form_id, fk,
+                                            filter_string, top)
         else:
-            rows = await self.t.query(n.form_id, fk, filter_string, top)
-        rows = rows if isinstance(rows, list) else _rows_of(rows)
-        return {"noun": n.form_id, "zh": n.zh, "category": n.category,
-                "count": len(rows), "fields": fk, "rows": rows}
+            raw = await self.t.query(n.form_id, fk, filter_string, top)
+
+        ds = self.pipe.from_query(n.form_id, raw, field_keys=fk,
+                                  filter_string=filter_string, top=top)
+        if self.index is not None:
+            self.index.upsert(ds)
+        q = ds.quality()
+        out = {"noun": n.form_id, "zh": n.zh, "category": n.category,
+               "count": len(ds), "fields": fk, "rows": ds.rows,
+               "provenance": {"source": ds.provenance.source,
+                              "fetched_at": ds.provenance.fetched_at,
+                              "truncated": ds.provenance.truncated}}
+        # 只在有话说的时候才带质量提示，别把正常结果也堆满元数据
+        if q["missing_columns"]:
+            out["missing_columns"] = q["missing_columns"]
+            out["missing_note"] = ("这些字段请求了但响应里一行都没有——"
+                                   "在本账套可能不存在（二开删了或改名了），"
+                                   "与『取到了但为空』是两回事。")
+        if q["state_unresolved"]:
+            out["state_unresolved"] = q["state_unresolved"]
+            out["state_note"] = ("这些行的状态归一不出来，对象层只能标 unverified。"
+                                 "多半是 FDocumentStatus 没在字段集里。")
+        if ds.provenance.truncated:
+            out["truncated_note"] = f"命中 top={top} 上限，还有更多没取到。"
+        return out
 
     async def read(self, noun: str, bill_id: str) -> dict:
         """查看单据详情（View 端点）。"""
@@ -279,6 +329,11 @@ class Dispatcher:
         不带 obj_id 时返回**类型卡片**（这类对象长什么样、能做什么），
         与实例卡片同形状 —— 使用者不必学两套结构。
         """
+        # 【态】运行也是对象：走同一套卡片机制，态势才能被人用同一种方式感知，
+        # 而不是另起一套只有工程师看得懂的枚举。
+        if self.o.resolve_noun(noun).form_id == "SAGA_Run":
+            return self._saga_card(obj_id)
+
         if obj_id is None:
             card = self.m.card(noun)
             card["hint"] = ("这是类型卡片。带 id 可打开具体对象；"
@@ -301,6 +356,65 @@ class Dispatcher:
                 f"确认传的是内码 {ot.id_property} 还是编号 {ot.title_property}——"
                 f"两者不通用，系统也没有提供二者的解析动词（审计 L-3）。")
         return self.m.card(noun, props)
+
+    def _saga_card(self, run_id: Optional[str]) -> dict:
+        """把一次运行呈现成对象卡片：属性 + 状态 + 此刻能做什么。
+
+        【态】运行也是对象，走同一套卡片机制——态势才能被人用同一种方式感知，
+        而不是另起一套只有工程师看得懂的枚举。
+        """
+        if run_id is None:
+            runs = self.saga.store.unresolved()
+            return {"object_type": "SAGA_Run", "zh": "操作运行", "category": "view",
+                    "is_instance": False, "count": len(runs),
+                    "rows": [{"run_id": r["run_id"], "operation": r["operation"],
+                              "_state": f"SAGA:{r['state']}",
+                              "state_zh": (self.o.states.get(f"SAGA:{r['state']}") or {}).get("zh"),
+                              "cursor": r["cursor"], "total_steps": len(r["steps"]),
+                              "updated_at": r["updated_at"]} for r in runs],
+                    "hint": "只列没走到干净终态的。带 id 看某一次的详情。"}
+        run = self.saga.store.get(run_id)
+        if run is None:
+            raise OntologyError(
+                f"找不到运行 {run_id}。用 kd_object(noun='操作运行') 看还有哪些没了结。")
+        rep = self.saga.report(run)
+        code = f"SAGA:{run.state}"
+        meta = self.o.states.get(code) or {}
+        # 运行上「此刻能做什么」：等授权时能批/能拒，其余状态只能看
+        actions = []
+        if run.state == "awaiting_auth":
+            actions = [
+                {"verb": "authorize", "zh": "批准这一步", "enabled": True,
+                 "params": [{"name": "by", "type": "string", "required": True,
+                             "label": "授权人姓名", "hint": "必须记名——谁批的要能查到"}]},
+                {"verb": "reject", "zh": "拒绝这一步", "enabled": True,
+                 "destructive": True,
+                 "params": [{"name": "by", "type": "string", "required": True,
+                             "label": "授权人姓名"},
+                            {"name": "reason", "type": "string", "required": False,
+                             "label": "理由"}]},
+            ]
+        return {
+            "object_type": "SAGA_Run", "zh": "操作运行", "category": "view",
+            "is_instance": True, "id": run.run_id, "title": run.zh,
+            "state": code, "state_zh": meta.get("zh"),
+            "state_note": meta.get("note", ""),
+            "terminal": bool(meta.get("terminal")),
+            "properties": [
+                {"name": "operation", "value": run.operation},
+                {"name": "进度", "value": f"{run.cursor + 1}/{len(run.steps)}"},
+                {"name": "targets", "value": run.targets},
+                {"name": "trace_id", "value": run.trace_id},
+                {"name": "updated_at", "value": run.updated_at},
+            ],
+            "actions": actions,
+            "steps": rep["steps"], "left_behind": rep["left_behind"],
+            "awaiting": rep.get("awaiting"), "tip": rep.get("tip", ""),
+            "links": [{"name": "审计链", "direction": "outgoing", "kind": "trace",
+                       "target_type": "operation_audit", "target_zh": "过程操作审计",
+                       "verified": "confirmed",
+                       "note": f"kd_audit(scope='trace', trace_id='{run.trace_id}')"}],
+        }
 
     def identify(self, bill_no: str) -> dict:
         """按编号前缀识别单据类型。启发式，返回候选而非断言。"""
@@ -352,10 +466,7 @@ class Dispatcher:
     def _propose_link_filter(self, src: str, dst: str, flt: str, link: dict) -> None:
         """把探测出来的关联字段提给知识库。只提议，不自动改配置。"""
         try:
-            import sys as _sys
-            from pathlib import Path as _P
-            _sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
-            from wikiskill.knowledge import Entry, Knowledge
+            from kingdee_ontology.wikiskill.knowledge import Entry, Knowledge
             import hashlib
             s = self.o.resolve_noun(src).form_id
             t = self.o.resolve_noun(dst).form_id
@@ -419,91 +530,72 @@ class Dispatcher:
     # ── 业务操作入口（面向人的那一层）──────────────────────────
     async def run_operation(self, key: str, targets: list[str],
                             confirmed: bool = False,
-                            on_behalf_of: Optional[str] = None) -> dict:
-        """执行租户定义的业务操作。
+                            on_behalf_of: Optional[str] = None,
+                            run_id: Optional[str] = None) -> dict:
+        """执行租户定义的业务操作 —— 走 Saga 引擎。
 
-        与 kingdee_create_and_audit 这类"一站式"工具的关键区别（修 A-1）：
-          - 每一步都落一条审计记录，共享同一 trace_id；
-          - 中途失败**立即停止并明确报告已产生的中间物**，而不是给一段文字建议；
-          - 含不可逆动作时必须先拿到人的确认才开跑。
-        补偿仍需人工/后续动作完成 —— 但至少中间态是被记录、可清算的。
+        与「顺序执行一串动作」的区别（这也是审计 A-1 真正的解法）：
+          守卫  `检查` 步骤在写之前先验条件，不满足就不往下走；
+          授权  每个子任务可以各自串一道人工授权，不是开头点一次就全权委托；
+          补偿  任一步失败，已生效的写步骤按**逆序**补偿；
+          留痕  谁授权了哪一步、补偿做没做成，全部落盘且可续跑。
+
+        run_id 非空表示续跑一个已存在的运行（授权之后回来接着走）。
         """
-        op = self.o.operation(key)
-        needs_confirm = op.confirm or any(s.get("做") == "确认" for s in op.steps)
-        if needs_confirm and not confirmed:
-            questions = [s["问"] for s in op.steps if s.get("做") == "确认"]
-            return {
-                "operation": op.key, "zh": op.zh, "owner": op.owner,
-                "status": "awaiting_confirmation",
-                "questions": questions or [f"即将执行『{op.zh}』，确认继续？"],
-                "plan": [self._describe_step(s) for s in op.steps],
-                "targets": targets,
-                "tip": "确认后请带 confirmed=True 重新调用。执行前不会有任何写操作。",
-            }
+        if run_id:
+            run = self.saga.store.get(run_id)
+            if run is None:
+                raise OntologyError(f"找不到运行 {run_id}。用 kd_saga(action='list') 看看还有哪些。")
+        else:
+            run = self.saga.plan(key, targets)
 
-        out: dict[str, Any] = {"operation": op.key, "zh": op.zh, "owner": op.owner,
-                               "steps": [], "produced": {}, "halted_at": None}
-        carry: list[str] = list(targets)
-        carry_noun: Optional[str] = None
+        # 兼容旧行为：整体 confirm 或含「确认」步骤时，未确认不动手
+        op = self.o.operation(run.operation)
+        gate = op.confirm or any(s["kind"] == "确认" for s in run.steps)
+        if gate and not confirmed and not run_id:
+            rep = self.saga.report(run)
+            rep["status"] = "awaiting_confirmation"
+            rep["questions"] = [s["raw"]["问"] for s in
+                                [{"raw": st} for st in op.steps] if s["raw"].get("问")] \
+                or [f"即将执行『{op.zh}』，确认继续？"]
+            rep["tip"] = ("确认后带 confirmed=True 重新调用。执行前不会有任何写操作。"
+                          "注意：整体确认之后，标了『授权』的子任务仍会各自停下来等人批。")
+            return rep
 
-        with audit_recorder.operation(f"kd_run:{op.key}", actor=self.actor,
+        with audit_recorder.operation(f"kd_run:{run.operation}", actor=self.actor,
                                       on_behalf_of=on_behalf_of) as trace:
             self._op_ctx = trace
-            out["trace_id"] = trace.trace_id
+            run.trace_id = trace.trace_id
             try:
-                return await self._run_steps(op, out, targets, carry, on_behalf_of)
+                run = await self.saga.advance(run, make_executor(self, on_behalf_of))
             finally:
                 self._op_ctx = None
+        return self.saga.report(run)
 
-    async def _run_steps(self, op, out: dict, targets: list[str],
-                         carry: list[str], on_behalf_of: Optional[str]) -> dict:
-        carry_no_by_id: dict[str, str] = {}
-        for i, st in enumerate(op.steps, 1):
-            kind = st["做"]
-            if kind == "确认":
-                out["steps"].append({"step": i, "做": "确认", "outcome": "success",
-                                     "问": st.get("问", "")})
-                continue
-            try:
-                if kind == "下推":
-                    r = await self.push(st["从"], st["到"], carry,
-                                        on_behalf_of=on_behalf_of)
-                    ok = r.get("success", False)
-                    if ok:
-                        fids = r.get("target_fids") or []
-                        nos = r.get("target_bill_nos") or []
-                        carry = fids or nos
-                        carry_no_by_id = dict(zip(fids, nos)) if fids and nos else {}
-                        produced_noun = self.o.resolve_noun(st["到"]).form_id
-                        out["produced"].setdefault(produced_noun, []).extend(
-                            r.get("target_bill_nos") or [])
-                else:
-                    use = st.get("用", "targets")
-                    ids = carry if use == "上一步产物" else targets
-                    r = await self.act(kind, st["对象"], ids,
-                                       on_behalf_of=on_behalf_of,
-                                       no_by_id=carry_no_by_id)
-                    ok = r.get("success", False)
-            except OntologyError as e:
-                ok, r = False, {"error": str(e)}
-            out["steps"].append({"step": i, **self._describe_step(st),
-                                 "outcome": "success" if ok else "failed",
-                                 "detail": r})
-            if not ok:
-                out["halted_at"] = i
-                out["success"] = False
-                out["left_behind"] = out["produced"]
-                out["tip"] = (
-                    f"『{op.zh}』在第 {i} 步失败并已停止。"
-                    + (f"已经产生但尚未走完流程的单据：{out['produced']} —— "
-                       f"这些是**中间态**，需要继续处理或清理，不会自动回滚。"
-                       if out["produced"] else "尚未产生任何单据，无需清理。")
-                    + " 用 kd_audit(scope='dangling') 可以随时查到未清算的中间态。")
-                return out
+    def authorize_step(self, run_id: str, by: str, approve: bool = True,
+                       reason: str = "", step: Optional[int] = None) -> dict:
+        run = self.saga.store.get(run_id)
+        if run is None:
+            raise OntologyError(f"找不到运行 {run_id}")
+        run = self.saga.authorize(run, by=by, step=step, approve=approve, reason=reason)
+        rep = self.saga.report(run)
+        rep["tip"] = (rep.get("tip", "") + (
+            f" 已由 {by} 批准，用 kd_run(operation='{run.operation}', "
+            f"run_id='{run.run_id}') 继续。" if approve else ""))
+        return rep
 
-        out["success"] = True
-        out["tip"] = f"『{op.zh}』全部 {len(op.steps)} 步完成。"
-        return out
+    def saga_list(self, only_unresolved: bool = True) -> dict:
+        runs = self.saga.store.unresolved() if only_unresolved else self.saga.store.load_all()
+        return {
+            "count": len(runs),
+            "runs": [{"run_id": r["run_id"], "operation": r["operation"],
+                      "state": r["state"], "step": f"{r['cursor'] + 1}/{len(r['steps'])}",
+                      "updated_at": r["updated_at"],
+                      "left_behind": len(SagaRun(**r).produced_objects())} for r in runs],
+            "note": ("这些运行都没走到干净终态：等授权的、停住的、补偿失败的。"
+                     "等授权的最容易被忘掉——放着不管，已生效的写操作就成了"
+                     "无人认领的中间态。" if only_unresolved else ""),
+        }
 
     @staticmethod
     def _describe_step(st: dict) -> dict:

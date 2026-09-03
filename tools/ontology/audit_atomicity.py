@@ -27,8 +27,8 @@ from extract_ontology import (  # noqa: E402
     ROOT, WRITE_VERBS, _load_tree, build,
 )
 
-RULES_PY = ROOT / "harness" / "rules.py"
-HARNESS_TOOLS_PY = ROOT / "harness" / "tools.py"
+RULES_PY = ROOT / "src" / "kingdee_ontology" / "harness" / "rules.py"
+HARNESS_TOOLS_PY = ROOT / "src" / "kingdee_ontology" / "harness" / "tools.py"
 SERVER_PY = ROOT / "src" / "kingdee_mcp" / "server.py"
 
 WRITE_ENDPOINTS = {"save", "submit", "audit", "unaudit", "delete",
@@ -81,6 +81,53 @@ def _is_branch_dispatch(fn_src: str) -> bool:
 def _finding(fid, level, title, evidence, detail):
     return {"id": fid, "level": level, "title": title,
             "evidence": evidence, "detail": detail}
+
+
+def _audit_link_wiring(hard: list[str]) -> list[dict]:
+    """legacy 的下推到底有没有接上注册表——**去代码里看**，不要凭印象断言。
+
+    这条检查原来是无条件发出的，文案写死「5 个 push 工具尚未接入，仍无法校验
+    某条下推是否合法」。可它们早就接上了：`_post_raw` 的 push 分支是所有下推的
+    唯一咽喉点，在那里查表并（严格模式下）阻断。审计说了一件与代码相反的事——
+    这比不报更糟，它教人忽略审计输出（同类前科见 04-audit-trail.md 的 F-1）。
+    """
+    src = SERVER_PY.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    def calls_check(node: ast.AST) -> bool:
+        return any(isinstance(n, ast.Call) and
+                   getattr(n.func, "id", getattr(n.func, "attr", None)) == "_check_push_link"
+                   for n in ast.walk(node))
+
+    chokepoint = next((f for f in ast.walk(tree)
+                       if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+                       and f.name == "_post_raw"), None)
+    gated = chokepoint is not None and calls_check(chokepoint)
+    strict_flag = "_STRICT_LINKS" in src
+    annotating = sorted({f.name for f in ast.walk(tree)
+                         if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+                         and f.name.startswith("kingdee_") and calls_check(f)})
+
+    if not gated:
+        return [_finding(
+            "AT-07", "warning", "下推链接未在咽喉点校验",
+            "src/kingdee_mcp/server.py:_post_raw",
+            f"硬编码链接 {hard}。注册表 base/registry.yml:links 存在，但 _post_raw 的 "
+            f"push 分支没有查表——各工具各自校验，会漏掉新增的下推入口。")]
+    if not strict_flag:
+        return [_finding(
+            "AT-07", "warning", "下推链接查了表但从不阻断",
+            "src/kingdee_mcp/server.py:_post_raw",
+            f"硬编码链接 {hard}。咽喉点会查表，但没有任何开关能让未登记的下推被拒。")]
+    return [_finding(
+        "AT-07", "info", "下推链接已接入注册表；默认只提示、不阻断",
+        "src/kingdee_mcp/server.py:_post_raw（咽喉点）",
+        f"硬编码链接 {hard} 均已登记。校验在 _post_raw 的 push 分支统一进行，"
+        f"覆盖全部下推路径（含复合工具）；另有 {len(annotating)} 个工具在返回体里"
+        f"附带链接状态：{annotating}。"
+        f"**默认只提示**：设 KINGDEE_STRICT_LINKS=1 才拒绝未登记的下推。"
+        f"默认不阻断是刻意的——未登记只说明本表不全，不代表该转换关系不存在，"
+        f"贸然阻断会挡掉二开账套里真实可用的下推。")]
 
 
 def audit(model: dict) -> list[dict]:
@@ -258,20 +305,16 @@ def audit(model: dict) -> list[dict]:
                 f"{lk['source_form']} → {lk['target_form']}，未登记于 FORM_CATALOG 的是 {missing}。"))
     if model["links"]:
         hard = [f"{l['source_form']}→{l['target_form']}" for l in model["links"] if l["hardcoded"]]
-        registry = ROOT / "base" / "registry.yml"
-        if registry.exists():
-            out.append(_finding(
-                "AT-07", "info", "legacy 路径的下推链接仍散落在函数体内",
-                "server.py 各 push 工具函数体内",
-                f"硬编码链接 {hard}。底座已有集中登记表 base/registry.yml:links "
-                f"并由 PRE-02 在发请求前校验，但 legacy 的 5 个 push 工具尚未接入，"
-                f"仍无法校验『某条下推是否合法』。"))
-        else:
+        registry = ROOT / "src" / "kingdee_ontology" / "base" / "registry.yml"
+        if not registry.exists():
             out.append(_finding(
                 "AT-07", "info", "下推链接无集中登记表",
                 "server.py 各 push 工具函数体内",
                 f"硬编码链接 {hard}，加上自由参数形式的入口，"
                 f"系统内不存在可校验『某条下推是否合法』的链接表。"))
+        else:
+            out.extend(_audit_link_wiring(hard))
+
 
     order = {"error": 0, "warning": 1, "info": 2}
     out.sort(key=lambda f: (order[f["level"]], f["id"]))

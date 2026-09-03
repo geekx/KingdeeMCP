@@ -11,9 +11,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from base.dispatch import Dispatcher            # noqa: E402
-from base.ontology import OntologyError, load   # noqa: E402
-from base.transport import FakeTransport        # noqa: E402
+from kingdee_ontology.base.dispatch import Dispatcher            # noqa: E402
+from kingdee_ontology.base.ontology import OntologyError, load   # noqa: E402
+from kingdee_ontology.base.transport import FakeTransport        # noqa: E402
 
 
 @pytest.fixture
@@ -137,8 +137,8 @@ class TestToolSurfaceStillSmall:
         import os
         os.environ.setdefault("KINGDEE_PASSWORD", "-")
         sys.path.insert(0, str(ROOT / "src"))
-        from base.server import mcp
-        from base.ontology import load as _load
+        from kingdee_ontology.base.server import mcp
+        from kingdee_ontology.base.ontology import load as _load
         tools = {t.name for t in asyncio.run(mcp.list_tools())}
         assert len(tools) <= 12, f"底座工具数 {len(tools)} 超出上限：{sorted(tools)}"
         core = {"kd_describe", "kd_query", "kd_act", "kd_push", "kd_object",
@@ -155,7 +155,7 @@ class TestToolSurfaceStillSmall:
 def cov():
     sys.path.insert(0, str(ROOT / "tools" / "ontology"))
     import measure_convergence as mc
-    from base.ontology import load as _load
+    from kingdee_ontology.base.ontology import load as _load
     _load.cache_clear()
     nouns = set(_load(tenant="").nouns)
     tools = mc._tools()

@@ -14,10 +14,10 @@ description: 回溯金蝶操作的每日执行情况并沉淀为可执行的改�
 ## 怎么跑
 
 ```bash
-python3 -m wikiskill.retro                    # 昨天+今天，写入知识库
-python3 -m wikiskill.retro --day 2026-09-02   # 指定日期
-python3 -m wikiskill.retro --all              # 全部历史
-python3 -m wikiskill.retro --report           # 只看，不写入
+python3 -m kingdee_ontology.wikiskill.retro                    # 昨天+今天，写入知识库
+python3 -m kingdee_ontology.wikiskill.retro --day 2026-09-02   # 指定日期
+python3 -m kingdee_ontology.wikiskill.retro --all              # 全部历史
+python3 -m kingdee_ontology.wikiskill.retro --report           # 只看，不写入
 ```
 
 输出分两部分：本次扫描统计（新增/强化/已否决跳过），以及**可执行项**。
@@ -57,8 +57,8 @@ python3 -m wikiskill.retro --report           # 只看，不写入
 **只提议，不自动改。** 自动改 ERP 的操作定义是危险的。落地要人点头：
 
 ```bash
-python3 -m wikiskill.retro --adopt <id>
-python3 -m wikiskill.retro --reject <id> --note "业务上就是这样，不改"
+python3 -m kingdee_ontology.wikiskill.retro --adopt <id>
+python3 -m kingdee_ontology.wikiskill.retro --reject <id> --note "业务上就是这样，不改"
 ```
 
 被 reject 的条目**不会复活**：计数继续累积，但不再出现在可执行项里。

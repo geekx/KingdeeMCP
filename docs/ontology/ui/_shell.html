@@ -173,6 +173,23 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
 .graphwrap{overflow-x:auto;background:var(--card);border:1px solid var(--rule);
            border-radius:8px;padding:18px}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--ink-2);margin:10px 0 0;flex-wrap:wrap}
+.composeGrid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+@media (max-width:980px){.composeGrid{grid-template-columns:1fr}}
+#cgraph svg .node{cursor:pointer}
+#cgraph svg .node rect{transition:none}
+.startbar{display:flex;align-items:center;gap:9px;margin:0 0 2px}
+.startbar label{font-size:12px;color:var(--ink-2);flex:none}
+.startbar input{flex:1;max-width:420px;padding:6px 9px;border:1px solid var(--rule);
+                border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:13px}
+.startbar input[aria-invalid="true"]{border-color:var(--seal);background:var(--seal-soft)}
+#cpanel{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:14px 15px}
+#cpanel .opt{display:flex;align-items:center;gap:7px;margin:8px 0;font-size:12.5px}
+#cpanel select,#cpanel input{padding:5px 8px;border:1px solid var(--rule);border-radius:5px;
+  background:var(--paper);color:var(--ink);font:inherit;font-size:12.5px;flex:1;min-width:0}
+#cpanel input[type=checkbox]{flex:none;width:auto}
+.stepbadge{font-size:10px;padding:1px 6px;border-radius:3px;font-family:var(--mono)}
+.stepbadge.auth{background:var(--amber-soft);color:var(--amber)}
+.stepbadge.noc{background:var(--seal-soft);color:var(--seal)}
 .legend span{display:flex;align-items:center;gap:6px}
 
 /* ── 编排 ── */
@@ -237,14 +254,35 @@ pre.call{background:var(--ink);color:var(--paper);padding:11px 12px;border-radiu
   </div>
 </div>
 
-<div id="view-compose" hidden style="padding:20px 24px;max-width:840px">
+<div id="view-compose" hidden style="padding:20px 24px">
   <div class="eyebrow">业务操作编排</div>
-  <h2 style="font-size:16px;margin-bottom:4px">用你自己的说法给一件事命名</h2>
+  <h2 style="font-size:16px;margin-bottom:4px">在链路上把一件事拼出来</h2>
   <p class="sub" style="margin:0 0 14px">
-    编好后导出 YAML，贴进 <code>profiles/&lt;租户&gt;/profile.yml</code> 的 <code>operations</code> 段，
-    之后直接说「帮我做<b id="opname-echo">销售开票</b>」就能用。
+    <b>两个入口，同一份步骤</b>：上面在图上点——多步操作本来就长在下推链上，
+    <b>点节点</b>选起点、<b>点箭头</b>加一步下推，图上拼不出的连线本体里就不存在；
+    下面用表单加——确认、动词、守卫这些不在链上的步骤从这儿补。
+    两边改的是同一个列表，YAML 也只有一份。编好贴进
+    <code>profiles/&lt;租户&gt;/profile.yml</code>，之后直接说「帮我做<b id="opname-echo">销售开票</b>」。
+    <br>下面预置的是一个<b>销售订单</b>的例子——换个起点即可，采购、生产、调拨、
+    委外同样成立。
   </p>
-  <div class="card">
+  <div class="startbar">
+    <label for="opstart">起点</label>
+    <input id="opstart" list="startnouns" autocomplete="off" spellcheck="false"
+           placeholder="单据名 / 编码 / 别名，如 采购订单、PUR_PurchaseOrder、采购单">
+    <datalist id="startnouns"></datalist>
+    <button class="btn ghost" id="startclear" hidden>撤销</button>
+  </div>
+  <p class="hint" id="starthint"></p>
+  <div class="chips" id="startchips"></div>
+
+  <div class="eyebrow" style="margin-bottom:8px">① 图：顺着下推链往下走</div>
+  <div class="composeGrid">
+    <div class="graphwrap" id="cgraph"></div>
+    <div id="cpanel"></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="eyebrow" style="margin-bottom:10px">② 表单：补链上没有的步骤，和上面共用一份列表</div>
     <div class="form" style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
       <div><label for="opname">操作名</label><input id="opname" value="销售开票"></div>
       <div><label for="opowner">责任部门</label><input id="opowner" value="财务部"></div>
@@ -544,27 +582,192 @@ const WRITE_VERBS = Object.entries(D.verbs).filter(([, v]) => v.kind === 'write'
 function stepText(s) {
   if (s.做 === '下推') return `下推：${byId[s.从]?.zh || s.从} → ${byId[s.到]?.zh || s.到}`;
   if (s.做 === '确认') return `确认：${s.问}`;
-  return `${D.verbs[s.做]?.zh || s.做}：对 ${byId[s.对象]?.zh || s.对象}（${s.用}）`;
+  if (s.做 === '检查') return `守卫：${byId[s.对象]?.zh || s.对象} 满足 ${s.条件}`;
+  const comp = D.verbs[s.做]?.compensation;
+  return `${D.verbs[s.做]?.zh || s.做}：对 ${byId[s.对象]?.zh || s.对象}（${s.用}）`
+    + (s.授权 ? `　⟨需${s.授权 === true ? '' : s.授权}授权⟩` : '')
+    + (comp ? '' : '　⟨退不回来⟩');
 }
-function renderCompose() {
+/* ⚠️ 这里曾有一个 bug：renderCompose 绑在整个面板的 input 事件上，
+   而它会重建 #argwrap 的 innerHTML。于是用户一选下拉就触发重建，
+   select 被换成新元素、回到第一项——**永远只有第一条能进 YAML**。
+
+   修法是把「重建控件」和「刷新预览」彻底分开：
+     renderArgs()    只在步骤类型变化时重建控件；
+     renderPreview() 输入时只刷新步骤列表与 YAML，绝不碰 #argwrap。 */
+function renderArgs() {
+  const kind = document.getElementById('stepkind').value;
+  const wrap = document.getElementById('argwrap');
+  const opts = D.links.map(l =>
+    `<option value="${l.from}|${l.to}">${byId[l.from]?.zh || l.from} → ${byId[l.to]?.zh || l.to}</option>`).join('');
+  wrap.innerHTML =
+    kind === '下推' ? `<select id="arg1" aria-label="下推关系">${opts}</select>`
+    : kind === '确认' ? `<input id="arg1" size="34" placeholder="要让人确认什么？" aria-label="确认问题">`
+    : `<select id="arg1" aria-label="动词">${WRITE_VERBS.map(v =>
+         `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')}</select>
+       <select id="arg2" aria-label="对象"></select>
+       <select id="arg3" aria-label="用什么"><option>上一步产物</option><option>targets</option></select>`;
+  if (kind !== '下推' && kind !== '确认') syncObjectOptions();
+}
+
+/* 对象下拉必须跟着动词过滤，只列**这个动词真的适用**的对象类型。
+   不过滤的话可以拼出「反审核 + 仓库」这种组合——基础资料没有审核流，
+   校验器会拒，可界面却让你选得出来。让人拼出一个不成立的东西，
+   比不让他拼更糟：他会以为是配置系统坏了。 */
+function syncObjectOptions() {
+  const verb = document.getElementById('arg1').value;
+  const sel = document.getElementById('arg2');
+  if (!sel) return;
+  const keep = sel.value;
+  const ok = D.types.filter(t => t.actions.some(a => a.verb === verb));
+  sel.innerHTML = ok.map(t =>
+    `<option value="${t.form_id}">${esc(t.zh)}</option>`).join('')
+    || '<option value="">没有对象支持这个动词</option>';
+  if (ok.some(t => t.form_id === keep)) sel.value = keep;   // 仍适用就保住原选择
+}
+
+/* ── 起点：不是只有销售订单 ────────────────────────────────
+   预置的例子起于销售订单，于是它看着像**唯一**入口——可后端从来没这个限制
+   （示例租户里「采购收货入库」就起于采购订单）。一个默认值被当成约束，
+   是界面在替本体说话，而且说错了。
+
+   85 个名词铺成下拉太长，所以用补全输入框：中文名、form_id、别名都能命中；
+   下面再摆一排常用起点，省得不知道能填什么。 */
+function entryPoints() {
+  const out = D.links.reduce((m, l) => (m[l.from] = (m[l.from] || 0) + 1, m), {});
+  return D.types
+    .map(t => ({t, pushes: out[t.form_id] || 0,
+                writes: (t.actions || []).length}))
+    // 能起一件多步的事，要么能下推出下游单，要么本身有写动作可做
+    .filter(x => x.pushes || x.writes)
+    .sort((a, b) => b.pushes - a.pushes || a.t.zh.localeCompare(b.t.zh, 'zh'));
+}
+
+/* 认中文名、form_id、别名；先精确、再前缀、最后包含。
+   顺序很重要：「销售订单」不该被「销售订单变更单」这种更长的名字抢先。 */
+function resolveNoun(text) {
+  const q = (text || '').trim();
+  if (!q) return null;
+  const ok = entryPoints().map(x => x.t);
+  const norm = s => (s || '').toLowerCase();
+  const cand = t => [t.form_id, t.zh, ...(t.alias || [])];
+  return ok.find(t => cand(t).some(c => norm(c) === norm(q)))
+      || ok.find(t => cand(t).some(c => norm(c).startsWith(norm(q))))
+      || ok.find(t => cand(t).some(c => norm(c).includes(norm(q))))
+      || null;
+}
+
+let _stepsBeforeStart = null;      // 换起点会清空步骤，留一手给「撤销」
+
+/* startNoun 与 cSel 不是一回事，混用会让起点栏在加了一步之后就开始说谎：
+     cSel       当前位置——commitSteps() 会把它推到步骤链的末端
+     startNoun  这件事从哪张单开始——加多少步都不该变
+   有步骤时以步骤为准（步骤才是事实），没步骤时才用显式选的那个。 */
+let startNoun = null;
+function derivedStart() {
+  for (const s of steps) {
+    if (s.做 === '下推') return s.从;
+    if (s.对象) return s.对象;
+  }
+  return startNoun;
+}
+
+function renderStartBar() {
+  const eps = entryPoints();
+  document.getElementById('startnouns').innerHTML = eps.map(x =>
+    `<option value="${esc(x.t.zh)}">${esc(x.t.form_id)}</option>`).join('');
+  // 常用起点＝下推目标最多的那几个。它们是链头，最可能是一件事的开头。
+  const cur = derivedStart();
+  document.getElementById('startchips').innerHTML =
+    eps.filter(x => x.pushes).slice(0, 8).map(x =>
+      `<button class="chip" data-start="${x.t.form_id}"
+         aria-pressed="${x.t.form_id === cur}">${esc(x.t.zh)}</button>`).join('')
+    + `<span class="hint" style="align-self:center;margin-left:4px">共 ${eps.length} 个可选起点</span>`;
+  syncStartHint();
+}
+
+function syncStartHint() {
+  const el = document.getElementById('starthint');
+  const inp = document.getElementById('opstart');
+  const cur = derivedStart();
+  const t = cur && D.types.find(x => x.form_id === cur);
+  if (!t) { el.textContent = ''; return; }
+  if (document.activeElement !== inp) inp.value = t.zh;
+  const pushes = D.links.filter(l => l.from === t.form_id);
+  el.innerHTML = `<b>${esc(t.zh)}</b> <code>${esc(t.form_id)}</code>　`
+    + (pushes.length
+        ? `可下推 ${pushes.length} 种：${pushes.map(l => esc(byId[l.to]?.zh || l.to)).join('、')}`
+        : '没有已登记的下推目标——只能对它本身做动词步')
+    + `　·　${(t.actions || []).length} 个写动作`;
+  inp.setAttribute('aria-invalid', 'false');
+}
+
+function setStart(formId, {clearSteps = true} = {}) {
+  startNoun = formId;
+  cSel = formId;
+  const inp = document.getElementById('opstart');
+  const t = D.types.find(x => x.form_id === formId);
+  if (t) inp.value = t.zh;
+  if (clearSteps && steps.length) {
+    _stepsBeforeStart = steps.slice();
+    steps = [];
+    document.getElementById('startclear').hidden = false;
+  }
+  renderStartBar();
+  renderComposeGraph(); renderComposePanel(); renderPreview();
+}
+
+document.getElementById('opstart').addEventListener('change', e => {
+  const t = resolveNoun(e.target.value);
+  if (!t) {
+    // 认不出来就说清楚，别默默不动——「点了没反应」比报错更难查
+    e.target.setAttribute('aria-invalid', 'true');
+    document.getElementById('starthint').textContent =
+      `认不出「${e.target.value}」。可用中文名、form_id 或别名；下面一排是常用起点。`;
+    return;
+  }
+  setStart(t.form_id);
+});
+document.getElementById('startchips').addEventListener('click', e => {
+  const b = e.target.closest('[data-start]');
+  if (b) setStart(b.dataset.start);
+});
+document.getElementById('startclear').onclick = () => {
+  if (!_stepsBeforeStart) return;
+  steps = _stepsBeforeStart; _stepsBeforeStart = null;
+  document.getElementById('startclear').hidden = true;
+  commitSteps();
+};
+
+/* ── 图与表单是同一份 steps 的两个入口，不是两套东西 ──────────
+   图上点适合"顺着链往下走"，表单适合补一条链上没有的（确认、动词、
+   跨账套的活）。谁改完都走 commitSteps()，两边才不会各说各话。 */
+function currentNode() {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s.做 === '下推') return s.到;
+    if (s.对象) return s.对象;
+  }
+  return cSel;
+}
+function commitSteps() {
+  const next = currentNode(), moved = next !== cSel;
+  cSel = next;
+  renderComposeGraph();
+  // 选中点没变就别重建面板：正在输入的守卫条件、授权角色会被一起清掉
+  if (moved) renderComposePanel();
+  renderStartBar();
+  renderPreview();
+}
+
+function renderPreview() {
   document.getElementById('opname-echo').textContent =
     document.getElementById('opname').value || '这个操作';
   document.getElementById('steps').innerHTML = steps.length
     ? steps.map((s, i) => `<div class="step"><span class="idx">${i + 1}</span>
         <span>${esc(stepText(s))}</span>
         <button class="x" data-del="${i}" aria-label="删除第 ${i + 1} 步">×</button></div>`).join('')
-    : '<p class="empty">还没有步骤。用下面的控件加一步。</p>';
-
-  const kind = document.getElementById('stepkind').value;
-  const opts = D.links.map(l =>
-    `<option value="${l.from}|${l.to}">${byId[l.from]?.zh || l.from} → ${byId[l.to]?.zh || l.to}</option>`).join('');
-  document.getElementById('argwrap').innerHTML =
-    kind === '下推' ? `<select id="arg1">${opts}</select>`
-    : kind === '确认' ? `<input id="arg1" size="34" placeholder="要让人确认什么？">`
-    : `<select id="arg1">${WRITE_VERBS.map(v => `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')}</select>
-       <select id="arg2">${D.types.filter(t => t.actions.length)
-         .map(t => `<option value="${t.form_id}">${esc(t.zh)}</option>`).join('')}</select>
-       <select id="arg3"><option>上一步产物</option><option>targets</option></select>`;
+    : '<p class="empty">还没有步骤。上面图上点箭头，或用下面的控件加一步——两边都行。</p>';
 
   const name = document.getElementById('opname').value || '未命名操作';
   const owner = document.getElementById('opowner').value;
@@ -576,12 +779,26 @@ function renderCompose() {
   steps.forEach(s => {
     if (s.做 === '下推') y.push(`      - {做: 下推, 从: ${s.从}, 到: ${s.到}}`);
     else if (s.做 === '确认') y.push(`      - {做: 确认, 问: "${s.问}"}`);
-    else y.push(`      - {做: ${s.做}, 对象: ${s.对象}, 用: ${s.用}}`);
+    else if (s.做 === '检查') y.push(`      - {做: 检查, 对象: ${s.对象}, 条件: "${s.条件}"}`);
+    else y.push(`      - {做: ${s.做}, 对象: ${s.对象}, 用: ${s.用}`
+                + (s.授权 ? `, 授权: ${s.授权 === true ? 'true' : s.授权}` : '') + `}`);
   });
   document.getElementById('yaml').textContent = y.join('\n');
 }
-document.getElementById('view-compose').addEventListener('input', renderCompose);
-document.getElementById('stepkind').onchange = renderCompose;
+
+function renderCompose() { renderArgs(); renderPreview(); }
+
+/* 只监听真正需要刷新预览的输入，且**不重建控件**。
+   用 change 而非 input 监听 stepkind，避免与下面的 onchange 打架。 */
+document.getElementById('view-compose').addEventListener('input', e => {
+  if (e.target.closest('#argwrap')) return;   // 控件区的输入与预览无关
+  renderPreview();
+});
+document.getElementById('stepkind').onchange = () => { renderArgs(); renderPreview(); };
+/* 换动词时重算对象下拉。用事件委托——控件是动态生成的，直接绑会在重建后失效。 */
+document.getElementById('argwrap').addEventListener('change', e => {
+  if (e.target.id === 'arg1') syncObjectOptions();
+});
 document.getElementById('addstep').onclick = () => {
   const kind = document.getElementById('stepkind').value;
   const a1 = document.getElementById('arg1');
@@ -589,17 +806,169 @@ document.getElementById('addstep').onclick = () => {
   else if (kind === '确认') { if (!a1.value.trim()) return; steps.push({做: '确认', 问: a1.value.trim()}); a1.value = ''; }
   else steps.push({做: a1.value, 对象: document.getElementById('arg2').value,
                    用: document.getElementById('arg3').value});
-  renderCompose();
+  commitSteps();            // 只刷预览与图，保住控件当前选择
 };
 document.getElementById('steps').onclick = e => {
   const b = e.target.closest('[data-del]'); if (!b) return;
-  steps.splice(+b.dataset.del, 1); renderCompose();
+  steps.splice(+b.dataset.del, 1); commitSteps();
 };
 document.getElementById('copyyaml').onclick = e => {
   navigator.clipboard?.writeText(document.getElementById('yaml').textContent).then(() => {
     e.target.textContent = '已复制'; setTimeout(() => e.target.textContent = '复制 YAML', 1400);
   }).catch(() => {});
 };
+
+/* ── 编排：在链路图上点节点 ────────────────────────────────
+   多步操作本来就长在下推链上。线性下拉列表逼着人在脑子里
+   把「A 能推出 B 吗」重新想一遍——图上直接点，拼不出的连线根本不存在。 */
+let cSel = null;                    // 当前选中的节点（下一步的起点）
+
+function renderComposeGraph() {
+  const nodes = [...new Set(D.links.flatMap(l => [l.from, l.to]))];
+  const out = {}, col = {};
+  nodes.forEach(n => out[n] = D.links.filter(l => l.from === n).length);
+  nodes.forEach(n => col[n] = D.links.some(l => l.to === n) ? (out[n] ? 1 : 2) : 0);
+  const cols = [[], [], []];
+  nodes.forEach(n => cols[col[n]].push(n));
+  for (let ci = 1; ci < 3; ci++) {
+    const prev = cols[ci - 1];
+    cols[ci].sort((a, b) => {
+      const rank = n => { const s = D.links.filter(l => l.to === n)
+        .map(l => prev.indexOf(l.from)).filter(i => i >= 0);
+        return s.length ? Math.min(...s) : 99; };
+      return rank(a) - rank(b);
+    });
+  }
+  const W = 250, H = 58, PAD = 20, BW = 176;
+  const pos = {};
+  cols.forEach((c, ci) => c.forEach((n, ri) => pos[n] = {x: PAD + ci * W, y: PAD + ri * H}));
+  const rows = Math.max(...cols.map(c => c.length), 1);
+  const w = PAD * 2 + W * 2 + BW, h = PAD * 2 + rows * H;
+
+  const used = new Set(steps.filter(s => s.做 === '下推').map(s => `${s.从}|${s.到}`));
+  const edges = D.links.map(l => {
+    const a = pos[l.from], b = pos[l.to];
+    const x1 = a.x + BW, y1 = a.y + 17, x2 = b.x, y2 = b.y + 17, c = (x1 + x2) / 2;
+    const on = used.has(`${l.from}|${l.to}`);
+    const stroke = on ? 'var(--accent)' : (l.verified === 'suspect' ? 'var(--amber)' : 'var(--rule)');
+    return `<g class="edge" data-edge="${l.from}|${l.to}" style="cursor:pointer">
+      <path d="M${x1} ${y1} C${c} ${y1} ${c} ${y2} ${x2} ${y2}" fill="none"
+        stroke="${stroke}" stroke-width="${on ? 2.5 : 1.4}"
+        ${l.verified === 'suspect' ? 'stroke-dasharray="4 3"' : ''}/>
+      <path d="M${x1} ${y1} C${c} ${y1} ${c} ${y2} ${x2} ${y2}" fill="none"
+        stroke="transparent" stroke-width="12"/>
+      <circle cx="${x2}" cy="${y2}" r="3" fill="${stroke}"/></g>`;
+  }).join('');
+
+  /* 连线本身不是个好点击目标：它从节点框底下穿过去，人（和测试）点中点时
+     命中的往往是压在上面的节点框。所以在每条线中点放一个"＋"按钮，
+     画在节点之后 —— 既压得住，也比"请点这条细线"讲得清楚。 */
+  const plus = D.links.map(l => {
+    const a = pos[l.from], b = pos[l.to];
+    const mx = (a.x + BW + b.x) / 2, my = (a.y + b.y) / 2 + 17;
+    const on = used.has(`${l.from}|${l.to}`);
+    return `<g class="plus" data-edge="${l.from}|${l.to}" style="cursor:pointer"
+       role="button" tabindex="0"
+       aria-label="加一步：${esc(byId[l.from] ? byId[l.from].zh : l.from)} 下推 ${
+         esc(byId[l.to] ? byId[l.to].zh : l.to)}">
+      <circle cx="${mx}" cy="${my}" r="9"
+        fill="${on ? 'var(--accent)' : 'var(--card)'}"
+        stroke="${on ? 'var(--accent)' : 'var(--rule)'}" stroke-width="1.2"/>
+      <text x="${mx}" y="${my + 4}" font-size="12" text-anchor="middle"
+        fill="${on ? 'var(--card)' : 'var(--ink-2)'}"
+        style="pointer-events:none;user-select:none">${on ? '✓' : '+'}</text></g>`;
+  }).join('');
+
+  const boxes = nodes.map(n => {
+    const p = pos[n], t = byId[n], sel = n === cSel;
+    const isStart = steps.length && (steps.find(s => s.做 === '下推') || {}).从 === n;
+    return `<g class="node" data-node="${n}" data-sel="${sel ? '1' : '0'}">
+      <rect x="${p.x}" y="${p.y}" width="${BW}" height="34" rx="6"
+        fill="${sel ? 'var(--accent-soft)' : 'var(--card)'}"
+        stroke="${sel || isStart ? 'var(--accent)' : 'var(--rule)'}"
+        stroke-width="${sel ? 2 : 1}"/>
+      <text x="${p.x + 10}" y="${p.y + 15}" font-size="12" fill="var(--ink)">${esc(t ? t.zh : n)}</text>
+      <text x="${p.x + 10}" y="${p.y + 27}" font-size="9.5" fill="var(--ink-3)"
+        font-family="var(--mono)">${esc(n)}</text></g>`;
+  }).join('');
+
+  document.getElementById('cgraph').innerHTML =
+    `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img"
+       aria-label="下推链路，点线上的加号或节点来编排">${edges}${boxes}${plus}</svg>
+     <p class="hint" style="margin:8px 0 0">
+       点线上的 <b>+</b> 加一步下推；点<b>节点</b>选中它，再在右侧给它挂动词。
+       加粗的绿线和 <b>✓</b> 是已经用到的步骤。这里只是入口之一——
+       确认、动词、守卫这些链上没有的步骤，用下面的表单补，两边共用一份列表。</p>`;
+}
+
+function renderComposePanel() {
+  const t = cSel ? byId[cSel] : null;
+  const verbs = t ? t.actions.map(a => a.verb) : [];
+  document.getElementById('cpanel').innerHTML = !t
+    ? `<div class="eyebrow">给这一步挂点什么</div>
+       <p class="empty">先在左边点一个节点。</p>`
+    : `<div class="eyebrow">${esc(t.zh)}</div>
+       <p class="hint" style="margin:0 0 10px"><code>${t.form_id}</code></p>
+       <div class="opt"><label style="flex:none">动词</label>
+         <select id="c_verb">${verbs.map(v =>
+           `<option value="${v}">${v} · ${D.verbs[v].zh}</option>`).join('')
+           || '<option value="">此对象不接受写动词</option>'}</select></div>
+       <div class="opt"><label style="flex:none">用</label>
+         <select id="c_use"><option>上一步产物</option><option>targets</option></select></div>
+       <div class="opt"><input type="checkbox" id="c_auth">
+         <label for="c_auth">需要人工授权</label>
+         <input id="c_role" placeholder="角色，如 财务主管" style="max-width:130px"></div>
+       <p class="hint" id="c_comp"></p>
+       <div class="addbar" style="margin-top:4px">
+         <button class="btn" id="c_addverb" ${verbs.length ? '' : 'disabled'}>加动词步</button>
+         <button class="btn ghost" id="c_addcheck">加守卫</button>
+       </div>
+       <div class="opt" style="margin-top:6px"><input id="c_cond" placeholder="守卫条件，如 FDocumentStatus = 'C'"></div>`;
+  if (t && verbs.length) syncCompNote();
+}
+
+/* 补偿是**动词的属性**，不是这里现编的——从本体读，并如实说明退不回来的情况。 */
+function syncCompNote() {
+  const v = document.getElementById('c_verb'); if (!v) return;
+  const info = D.verbs[v.value] || {};
+  const el = document.getElementById('c_comp');
+  el.innerHTML = info.compensation
+    ? `失败时可补偿：<code>${info.compensation}</code>（作用于${
+        info.compensation_target === 'produced' ? '本步产物' : '该对象自身'}）。无需在配置里重写。`
+    : `⚠️ <b>这一步退不回来</b>（本体里 <code>${v.value}</code> 没有 compensation）。
+       组里后面一旦失败，它只能人工收拾。`;
+}
+
+document.getElementById('cgraph').addEventListener('click', e => {
+  const edge = e.target.closest('[data-edge]');
+  if (edge) {
+    const [f, t] = edge.dataset.edge.split('|');
+    steps.push({做: '下推', 从: f, 到: t});
+    cSel = t;
+    commitSteps();
+    return;
+  }
+  const node = e.target.closest('[data-node]');
+  if (node) { cSel = node.dataset.node; renderComposeGraph(); renderComposePanel(); }
+});
+document.getElementById('cpanel').addEventListener('change', e => {
+  if (e.target.id === 'c_verb') syncCompNote();
+});
+document.getElementById('cpanel').addEventListener('click', e => {
+  if (e.target.id === 'c_addverb') {
+    const v = document.getElementById('c_verb').value; if (!v) return;
+    const st = {做: v, 对象: cSel, 用: document.getElementById('c_use').value};
+    if (document.getElementById('c_auth').checked)
+      st.授权 = document.getElementById('c_role').value.trim() || true;
+    steps.push(st); commitSteps();
+  }
+  if (e.target.id === 'c_addcheck') {
+    const cond = document.getElementById('c_cond').value.trim(); if (!cond) return;
+    steps.push({做: '检查', 对象: cSel, 条件: cond});
+    document.getElementById('c_cond').value = '';
+    commitSteps();
+  }
+});
 
 /* ── 标签页 ── */
 document.querySelector('.tabs').onclick = e => {
@@ -608,7 +977,9 @@ document.querySelector('.tabs').onclick = e => {
   ['obj', 'graph', 'compose'].forEach(v =>
     document.getElementById('view-' + v).hidden = v !== b.dataset.view);
   if (b.dataset.view === 'graph') renderGraph();
-  if (b.dataset.view === 'compose') renderCompose();
+  if (b.dataset.view === 'compose') {
+    renderCompose(); renderStartBar(); renderComposeGraph(); renderComposePanel();
+  }
 };
 
 renderList(); renderCenter(); renderRight();

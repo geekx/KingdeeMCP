@@ -63,7 +63,7 @@ jobs:
       - name: 租户配置校验
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
-        run: python -m base.validate_profile example-tenant
+        run: python -m kingdee_ontology.base.validate_profile example-tenant
 
       - name: 本体实例可抽取（AST 静态分析，不连账套）
         env:
@@ -85,6 +85,21 @@ jobs:
           KINGDEE_PASSWORD: '-'
         run: python tools/ontology/update_readme.py --check
 
+      - name: 数据加工层与索引层
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/test_pipeline_index.py -q
+
+      # 界面交互回归：真驱动 Chromium 点一遍。
+      # "选了不生效"这类缺陷读代码很难发现（每个函数单看都对），必须真点。
+      - name: 界面交互回归（编排器下拉）
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+          PLAYWRIGHT_BROWSERS_PATH: /opt/pw-browsers
+        run: |
+          pip install -q playwright && python -m playwright install --with-deps chromium
+          python -m pytest tests/test_ui_composer.py -q
+
       - name: 对象层与界面数据可生成
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
@@ -99,6 +114,23 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: |
-          python tools/ontology/test_operation_audit.py
-          python -m wikiskill.retro --report \
+          python -m pytest tests/test_operation_audit.py -q
+          python -m kingdee_ontology.wikiskill.retro --report \
             --audit docs/ontology/samples/operation_audit_record.sample.jsonl
+
+      # 打包产物必须真能装真能跑。这类缺陷对普通测试是隐形的：conftest 往
+      # sys.path 里塞了仓库路径，于是"只有在源码树里才导得到"的模块照样过测试，
+      # 装成 wheel 之后才 ModuleNotFoundError。所以必须真建真装真跑一遍。
+      - name: 打包产物可独立安装运行
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: |
+          pip install -q build
+          python -m pytest tests/test_packaging.py -q -m "slow or not slow"
+
+      # 离线包是给内网／隔离网段用的。它坏了的表现是"到了没网的机器前面才炸"，
+      # 那时候没人能修——所以必须在这里就用一个空解释器验一遍。
+      - name: 离线包可在零依赖环境运行
+        env:
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+        run: python -m pytest tests/test_offline_package.py -q -m "slow or not slow"

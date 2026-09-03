@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import functools
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -19,6 +20,31 @@ from typing import Any, Optional
 import yaml
 
 REGISTRY_PATH = Path(__file__).with_name("registry.yml")
+
+
+def profile_roots() -> list[Path]:
+    """去哪儿找租户配置，按优先级。
+
+    装进 site-packages 之后，包目录是只读的、升级即被覆盖——租户配置绝不能
+    只住在那里。所以先看环境变量，再看当前目录，最后才是包内自带的示例。
+    """
+    roots: list[Path] = []
+    env = os.environ.get("KINGDEE_PROFILES")
+    if env:
+        roots += [Path(x).expanduser() for x in env.split(os.pathsep) if x.strip()]
+    roots.append(Path.cwd() / "profiles")
+    roots.append(Path(__file__).resolve().parents[1] / "profiles")   # 包内示例
+    roots.append(Path(__file__).resolve().parents[3] / "profiles")   # 源码树
+    return roots
+
+
+def _profile_path(tenant: str) -> Path:
+    for r in profile_roots():
+        c = r / tenant / "profile.yml"
+        if c.is_file():
+            return c
+    # 一个不存在的路径交回去，由调用方按既有逻辑报"没有这个租户"
+    return profile_roots()[-2] / tenant / "profile.yml"
 
 
 class OntologyError(ValueError):
@@ -37,6 +63,11 @@ class Verb:
     endpoint: Optional[str] = None
     requires_state: tuple[str, ...] = ()
     to_state: Optional[str] = None
+    # 补偿 ≠ 逆动词：inverse 把**同一个对象**退回上一状态；
+    # compensation 把**这一步的产物**清理掉。push 没有 inverse（不存在 unpush），
+    # 但补偿是 delete——删掉新生成的下游单。对象都不是同一个。
+    compensation: Optional[str] = None
+    compensation_target: Optional[str] = None   # self | produced | None(退不回来)
 
     @property
     def destructive(self) -> bool:
@@ -90,6 +121,8 @@ class Ontology:
                 endpoint=v.get("endpoint"),
                 requires_state=tuple(v.get("requires_state") or ()),
                 to_state=v.get("to_state"),
+                compensation=v.get("compensation"),
+                compensation_target=v.get("compensation_target"),
             ) for k, v in (raw.get("verbs") or {}).items()
         }
         self.nouns: dict[str, Noun] = {
@@ -142,50 +175,47 @@ class Ontology:
         return self.verbs[name]
 
     # ── 前置条件（PRE-01..03）─────────────────────────────────
+    # 判断本身住在 aip/（判断层）：同一个问题只有一份实现，这里只做两件事——
+    # 把结论翻译成本层的调用约定（抛异常 / 返回警告串），并保持既有签名不变。
+    def decide(self, verb: str, noun_ref: str, state: Optional[str] = None,
+               target: Optional[str] = None, params: Optional[dict] = None):
+        """完整结论：一次给出全部理由，不在第一个问题上短路。"""
+        from kingdee_ontology.aip.logic import can
+        return can(self, verb, noun_ref, state=state, target=target, params=params)
+
     def check_verb_applies(self, verb: str, noun_ref: str) -> tuple[Verb, Noun]:
         """PRE-01：动词必须在名词的 allowed_verbs 内。"""
+        from kingdee_ontology.aip.logic import Facts, evaluate
         v, n = self.verb(verb), self.resolve_noun(noun_ref)
-        if v.name not in n.allowed_verbs:
-            reason = {
-                "view": "这是查询视图，没有自己的生命周期，只能 query",
-                "system": "这是系统对象（用户/角色/权限等），由金蝶系统管理，只能 query",
-                "master_data": "基础资料没有审核流，只有 save/forbid/enable",
-            }.get(n.category, "该动词不适用于此名词")
-            raise OntologyError(
-                f"动词 {v.name!r}({v.zh}) 不适用于 {n.form_id}({n.zh})：{reason}。"
-                f"可用动词：{sorted(n.allowed_verbs)}")
+        d = evaluate(Facts(ontology=self, verb=v.name, noun=n.form_id), only=["AIP-01"])
+        if d.blocks:
+            raise OntologyError(d.why())
         return v, n
 
     def check_link(self, source_ref: str, target_ref: str) -> dict:
         """PRE-02：下推的 (from,to) 必须已登记。"""
+        from kingdee_ontology.aip.logic import Facts, evaluate
         s, t = self.resolve_noun(source_ref), self.resolve_noun(target_ref)
-        link = self._link_index.get((s.form_id, t.form_id))
-        if link is None:
-            outs = [l["to"] for l in self.links if l["from"] == s.form_id]
-            raise OntologyError(
-                f"未登记的下推关系 {s.form_id} → {t.form_id}。"
-                + (f"{s.form_id} 已登记的目标单：{outs}" if outs else
-                   f"{s.form_id} 没有任何已登记的下推目标。")
-                + " 若确认该转换规则存在，请补进 base/registry.yml:links 而不是绕过校验。")
-        return link
+        d = evaluate(Facts(ontology=self, noun=s.form_id, target=t.form_id),
+                     only=["AIP-02"])
+        if d.blocks:
+            raise OntologyError(d.why())
+        return self._link_index[(s.form_id, t.form_id)]
 
     def check_state(self, verb: str, current_state: Optional[str]) -> Optional[str]:
         """PRE-03：requires_state 校验。未知当前状态时降级为警告，不阻断。
 
         刻意不在这里自动补一次查询——那会把每个写操作的往返翻倍。
+        判断层把「不知道」记为 undetermined；这个入口按既有约定把它降级成
+        一句警告返回，而不是拦下。想要严格语义的调用方请用 decide()。
         """
-        v = self.verb(verb)
-        if not v.requires_state:
-            return None
-        if current_state is None:
-            return (f"未提供 current_state，跳过状态校验。{v.name} 要求对象处于 "
-                    f"{list(v.requires_state)} 之一，若不确定请先 kd_read。")
-        if current_state not in v.requires_state:
-            raise OntologyError(
-                f"{v.name}({v.zh}) 要求对象处于 {list(v.requires_state)} 之一，"
-                f"当前为 {current_state!r}。"
-                + (f"可先执行 {self._verb_reaching(v.requires_state[0])} 到达所需状态。"
-                   if self._verb_reaching(v.requires_state[0]) else ""))
+        from kingdee_ontology.aip.logic import Facts, evaluate
+        d = evaluate(Facts(ontology=self, verb=self.verb(verb).name,
+                           state=current_state), only=["AIP-03"])
+        if d.blocks:
+            raise OntologyError(d.why())
+        if d.undetermined:
+            return d.undetermined[0].text
         return None
 
     def _verb_reaching(self, state: str) -> Optional[str]:
@@ -202,6 +232,8 @@ class Ontology:
                 return {"verb": v.name, "zh": v.zh, "kind": v.kind, "arity": v.arity,
                         "atomicity": v.atomicity, "idempotent": v.idempotent,
                         "inverse": v.inverse, "destructive": v.destructive,
+                        "compensation": v.compensation,
+                        "compensation_target": v.compensation_target,
                         "requires_state": list(v.requires_state), "to_state": v.to_state}
             return {"verbs": [{"verb": v.name, "zh": v.zh, "kind": v.kind,
                                "atomicity": v.atomicity, "destructive": v.destructive}
@@ -227,6 +259,21 @@ class Ontology:
             return {"links": self.links}
         if what == "rules":
             return {"rules": self.rules}
+        if what == "logic":
+            # 判断层的自我说明：有哪些逻辑函数、各自执行哪条规则、需要哪些事实。
+            # key 形如 "audit@SAL_SaleOrder" 或 "audit@SAL_SaleOrder@C" 时直接判一次，
+            # 省得调用方为了知道"能不能做"先拉一遍全量本体自己推。
+            from kingdee_ontology.aip.logic import describe as _logic_describe
+            if not key:
+                return {"note": "判断层：纯函数，不发请求。key='动词@名词[@当前状态]' 可直接判一次。",
+                        "functions": _logic_describe()}
+            parts = [p.strip() for p in key.split("@")]
+            if len(parts) < 2:
+                raise OntologyError(
+                    f"what='logic' 的 key 要写成 '动词@名词[@当前状态]'，"
+                    f"如 'audit@销售订单@B'。收到的是 {key!r}。")
+            verb, noun, state = parts[0], parts[1], (parts[2] if len(parts) > 2 else None)
+            return self.decide(verb, noun, state=state).to_dict()
         if what == "prefixes":
             return {"note": "编号前缀由租户的编码规则决定，此表为启发式，命中只说明"
                             "『很可能是』；各家可在 profile 的 bill_prefixes 段覆盖。",
@@ -298,7 +345,7 @@ def load_profile(tenant: Optional[str]) -> Optional[dict]:
     """按租户名加载 profiles/<tenant>/profile.yml；未指定或不存在返回 None。"""
     if not tenant:
         return None
-    p = Path(__file__).resolve().parents[1] / "profiles" / tenant / "profile.yml"
+    p = _profile_path(tenant)
     if not p.exists():
         raise OntologyError(
             f"找不到租户配置 {p}。"
@@ -309,6 +356,24 @@ def load_profile(tenant: Optional[str]) -> Optional[dict]:
     return data
 
 
+def registry_text(path: Optional[str] = None) -> str:
+    """读注册表。
+
+    不能只用 `Path.read_text`：打成 zipapp（离线单文件包）之后，包目录不是
+    真实目录，`__file__` 指向 zip 内部的一个伪路径，open() 直接失败。
+    importlib.resources 对"装在磁盘上"和"装在 zip 里"两种情形都认，
+    所以它是主路径，文件系统只作兜底。
+    """
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    try:
+        from importlib.resources import files
+        return files("kingdee_ontology.base").joinpath(
+            "registry.yml").read_text(encoding="utf-8")
+    except Exception:
+        return REGISTRY_PATH.read_text(encoding="utf-8")
+
+
 @functools.lru_cache(maxsize=8)
 def load(path: Optional[str] = None, tenant: Optional[str] = None) -> Ontology:
     """加载本体。tenant 非空时叠加该租户的覆盖层。
@@ -317,7 +382,5 @@ def load(path: Optional[str] = None, tenant: Optional[str] = None) -> Ontology:
     同一份代码即可服务不同账套（「避免一种米养几种人」）。
     """
     import os
-    p = Path(path) if path else REGISTRY_PATH
     tenant = tenant if tenant is not None else os.environ.get("KINGDEE_TENANT", "")
-    return Ontology(yaml.safe_load(p.read_text(encoding="utf-8")),
-                    load_profile(tenant))
+    return Ontology(yaml.safe_load(registry_text(path)), load_profile(tenant))

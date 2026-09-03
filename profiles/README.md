@@ -15,7 +15,7 @@
 3. 校验并启用:
 
 ```bash
-python3 -m base.validate_profile acme      # 检查填得对不对，中文报错
+python3 -m kingdee_ontology.base.validate_profile acme      # 检查填得对不对，中文报错
 export KINGDEE_TENANT=acme                 # 启用
 ```
 
@@ -78,7 +78,7 @@ operations:
 ## 常见问题
 
 **Q:我不知道我们家某个单据的 form_id 怎么办?**
-让实施顾问在金蝶里看,或者跑 `python3 -m base.probe --search 开票` 从账套元数据里搜。
+让实施顾问在金蝶里看,或者跑 `python3 -m kingdee_ontology.base.probe --search 开票` 从账套元数据里搜。
 
 **Q:填错了会怎样?**
 `validate_profile` 会用中文告诉你哪一行错了、应该怎么改。

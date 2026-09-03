@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools" / "ontology"))
 
-from wikiskill.knowledge import Entry, Knowledge  # noqa: E402
-from wikiskill.retro import derive, retro         # noqa: E402
+from kingdee_ontology.wikiskill.knowledge import Entry, Knowledge  # noqa: E402
+from kingdee_ontology.wikiskill.retro import derive, retro         # noqa: E402
 
 
 def _rec(day, trace, step, verb, outcome, noun="STK_InStock",

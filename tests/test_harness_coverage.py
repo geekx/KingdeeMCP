@@ -13,8 +13,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from harness.rules import HARNESS_RULES, OpNode, validate_operation_chain  # noqa: E402
-from harness.tools import (  # noqa: E402
+from kingdee_ontology.harness.rules import HARNESS_RULES, OpNode, validate_operation_chain  # noqa: E402
+from kingdee_ontology.harness.tools import (  # noqa: E402
     NEXT_ACTION_VOCAB, WRITE_TOOL_VERBS, parse_next_action,
 )
 

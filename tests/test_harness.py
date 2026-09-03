@@ -6,10 +6,10 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from harness.rules import (
+from kingdee_ontology.harness.rules import (
     OpNode, HARNESS_RULES, validate_operation_chain, HarnessRule
 )
-from harness.feedback_loop import generate_loop_hint, FeedbackLoop
+from kingdee_ontology.harness.feedback_loop import generate_loop_hint, FeedbackLoop
 
 
 class TestHarnessRules:
