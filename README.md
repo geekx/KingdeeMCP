@@ -8,8 +8,8 @@
 ## 本分支的增补：操作原子化审计 + Ontology 建模 + 三层架构
 
 > **分支** `claude/kingdee-mcp-ontology-audit-nis4mg` ｜ **基线** 上游 `2c44e6f` ｜ **包版本** `v0.3.0`
-> **更新于** 2026-09-03 22:45 UTC+08:00
-> **测试** 2862 passed, 401 skipped in 80.33s (0:01:20)（本机实测）｜ **原子性审计** 5 项发现 / 0 项 error
+> **更新于** 2026-09-04 07:35 UTC+08:00
+> **测试** 2909 passed, 401 skipped in 77.69s (0:01:17)（本机实测）｜ **原子性审计** 5 项发现 / 0 项 error
 >
 > 本区块由 `python3 tools/ontology/update_readme.py` 生成，数字均为实测。
 
@@ -20,7 +20,7 @@
 
 | 指标 | 之前 | 现在 |
 |---|---|---|
-| MCP 工具面 `tools/list` | ~46,427 token（200k 上下文的 23%） | ~2,639 token（**-95%**） |
+| MCP 工具面 `tools/list` | ~46,427 token（200k 上下文的 23%） | ~2,839 token（**-94%**） |
 | 操作链约束层覆盖率 | 25%（24 个写动词只认 3 个） | **100%**（漏登记 = CI 失败） |
 | 自动审计 error | 7 | **0** |
 | 只读工具可由底座表达 | 0 / 72 | **68 / 72（94%）** |
@@ -214,7 +214,37 @@ uvx kingdee-mcp --transport streamable-http --host 0.0.0.0 --port 8000
 | Claude Code CLI | `~/.claude/settings.json` |
 | OpenClaw | 使用 `openclaw mcp set` 命令配置，自动热加载无需重启 |
 
-### 第三步：重启客户端
+**不用 JSON 也行：** 驱动这套 MCP 的不一定是上表里的客户端——Workbuddy、
+基于 DeepSeek 的 agent 之类的 harness，注入环境变量的方式各不相同。这种
+情况下把配置写进一个本地文件更省事：
+
+```bash
+cp .env.example .env      # 已在 .gitignore 里，不会被提交
+vim .env                  # 填好 4 项必填变量
+```
+
+服务端启动时自己去找这份文件（当前目录的 `.env` 找不到就退到主目录的
+`~/.kingdee-mcp.env`），不需要 harness 支持任何"注入环境变量"的机制——
+能起一个子进程就够。已经通过 MCP 客户端自己的方式配置好的，这份文件不会
+覆盖它，两种方式可以共存。
+
+### 第三步：自检一遍（推荐）
+
+不管用哪种方式配置，装完先跑一遍，比等第一次业务查询失败才发现账号密码
+不对要快——这一步**不需要先接上 MCP 协议**，任何能起子进程的 harness 都能跑：
+
+```bash
+python3 -m kingdee_ontology.setup_check
+```
+
+依次检查配置读到了没有、（如果指定了 `--tenant`）租户配置校验过不过、
+真登录一次并只读探测几类常见单据，报告这个账号大概能碰到哪些模块。
+只想看前两步、不想联网就加 `--skip-probe`。退出码 0 正常 / 1 配置有问题 /
+2 连不上——可以直接接在安装脚本里当门禁。
+
+MCP 会话里也能做同样的事：`kd_check_profile(probe=True)`。
+
+### 第四步：重启客户端
 
 配置完成后重启你的 MCP 客户端即可开始使用。
 
@@ -228,6 +258,8 @@ uvx kingdee-mcp --transport streamable-http --host 0.0.0.0 --port 8000
 | `KINGDEE_ACCT_ID` | 账套ID | `your-acct-id` |
 | `KINGDEE_USERNAME` | 金蝶账号 | `your-username` |
 | `KINGDEE_PASSWORD` | 金蝶账号密码（ValidateUser 登录，必填） | `your-password` |
+| `KINGDEE_TENANT` | 可选：租户覆盖层用哪一份 `profiles/<租户>/profile.yml` | `example-tenant` |
+| `KINGDEE_ENV_FILE` | 可选：显式指定凭据文件路径，覆盖默认查找顺序 | `/etc/kingdee/creds.env` |
 | `MCP_SQLSERVER_HOST` | SQL Server 主机（可选，用于数据库探查） | `localhost` |
 | `MCP_SQLSERVER_PORT` | SQL Server 端口（默认 1433） | `1433` |
 | `MCP_SQLSERVER_DATABASE` | 数据库名 | `AIS20260309171043` |

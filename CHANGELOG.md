@@ -10,6 +10,46 @@
 
 ## [Unreleased]
 
+### 新增：跨 harness 的引导式配置 —— 本地凭据文件 + 连通/权限自检
+
+驱动这套 MCP 的不一定是 Claude Code——Workbuddy、基于 DeepSeek 的 agent 之类
+的 harness，注入环境变量的方式并不统一。而装好之后第一次真正知道账号密码
+对不对、这个账号能碰到哪些模块，此前往往要等第一次业务查询失败才发现。
+
+**`.env` 本地凭据文件**（`src/kingdee_ontology/envfile.py`）：查找顺序
+`$KINGDEE_ENV_FILE` → 当前目录 `.env` → 主目录 `~/.kingdee-mcp.env`。只补
+`os.environ` 里没有的键，不覆盖已经通过 MCP 客户端自己方式配置好的变量——
+文件是兜底，不是真理来源。两个服务端入口（`kingdee_mcp/server.py`、
+`kingdee_ontology/base/server.py`）都在读任何 `KINGDEE_*` 之前接了这一行。
+新增 `.env.example` 模板。
+
+**连通与权限探测**（`src/kingdee_ontology/base/probe.py`）：真登录一次，
+逐个只读探测几类常见单据，报告哪些能查、哪些像是没权限。三个刻意的设计：
+
+- **只读**，全程只调 `query()`，不碰 `kd_act`；
+- **一出问题就停**——Kingdee 明确拒绝（权限不足/表单不存在）不算"出问题"，
+  那是探测本来就想知道的答案，继续测下一个；探测本身跑不通（登录失败/
+  网络故障）才算，此时立刻停，不把剩下的候选都超时一遍；
+- **权限判定是启发式的**，按错误信息里的中文关键词猜，没有拿真实账套
+  逐一验证过全部措辞，不确定时归到更保守的 `business_error`。
+
+默认探测候选优先复用 `kingdee_mcp` 那 97 个专用工具背后人工维护的
+`FORM_CATALOG`——这些表单久经使用、行为摸得清楚，比单纯按下推出边数量
+排序更不容易在探测阶段就先撞上冷门/边缘表单触发的怪问题；不够再按本租户
+已配置的业务操作入口、类别、出边数量补齐。
+
+**两个入口**：MCP 会话里 `kd_check_profile(probe=True)`；不需要先接上 MCP
+协议、任何能起子进程的 harness 都能跑的 `python3 -m kingdee_ontology.setup_check`
+（新增 `kingdee-setup-check` 命令）——退出码 0 正常 / 1 配置或 profile 有问题 /
+2 连不上或登录失败，可直接接在安装脚本里当门禁。
+
+顺手修了一处真缺陷：`validate_profile.validate("")`（没配置租户覆盖层，
+多数用户的默认状态）此前会报「租户 '' 没有配置文件」——这句话本身就说不通，
+压根没有叫"''"的租户，也没人要求它有配置文件。`load_profile("")` 按约定
+返回 `None` 表达"没有覆盖层"，`validate()` 原来把这和"指定了一个不存在的
+租户"混为一谈。现在没指定租户返回 `([], [])`，指定了不存在的租户名仍照旧
+报错。
+
 ### 修复：AIP-04/05 的忠告生成了，但没人知道要看它
 
 `Dispatcher.act()` 早就把判断层的忠告塞进 `out["advisories"]`，PR 里也写了

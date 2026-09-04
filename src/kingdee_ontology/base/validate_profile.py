@@ -112,6 +112,14 @@ def _check_steps(op_key: str, steps: list, o, errs: list, warns: list) -> None:
 def validate(tenant: str) -> tuple[list[str], list[str]]:
     errs: list[str] = []
     warns: list[str] = []
+    # 没指定租户＝没要覆盖层，用底座默认注册表——这是完全正常的状态，
+    # 不是"配置缺失"。`load_profile("")` 按约定返回 None 就是为了表达这个
+    # 意思；这里原来把它和"指定了一个不存在的租户"混为一谈，report 会说
+    # 「租户 '' 没有配置文件」——单看这句话就知道不对：压根没有叫"''"的租户，
+    # 也没人要求它有配置文件。真正指定了不存在租户名时，load_profile 会
+    # 直接抛 OntologyError（见其 docstring），不会走到这个分支。
+    if not tenant:
+        return [], []
     profile = load_profile(tenant)
     if not profile:
         return [f"租户 {tenant!r} 没有配置文件。"], []

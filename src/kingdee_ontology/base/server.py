@@ -17,6 +17,10 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field  # noqa: E402
 
+# 必须在下面任何 os.environ.get("KINGDEE_*") 之前跑——见 envfile.py 的说明。
+from kingdee_ontology.envfile import load_env_file  # noqa: E402
+load_env_file()
+
 from kingdee_ontology.base.dispatch import Dispatcher  # noqa: E402
 from kingdee_ontology.base.ontology import OntologyError, load  # noqa: E402
 
@@ -350,17 +354,37 @@ async def kd_audit(params: AuditInput) -> str:
     return _fmt({"records": recs[-params.limit:]})
 
 
-# ── 9. 校验租户配置 ──────────────────────────────────────────────
+# ── 9. 校验租户配置 / 连通性自检 ──────────────────────────────────
 @mcp.tool(name="kd_check_profile", annotations={
-    "title": "校验租户配置", "readOnlyHint": True, "idempotentHint": True})
+    "title": "校验配置 / 连通性自检", "readOnlyHint": True, "idempotentHint": True})
 @_guard
-async def kd_check_profile(tenant: str = "") -> str:
+async def kd_check_profile(tenant: str = "", probe: bool = False,
+                           probe_nouns: str = "") -> str:
     """校验租户配置（二开表单/操作码/下推关系/业务操作入口）是否填写正确。
-    返回中文的错误与建议，供业务人员自行修正 profiles/<租户>/profile.yml。"""
+    返回中文的错误与建议，供业务人员自行修正 profiles/<租户>/profile.yml。
+
+    probe=True 时额外做一次连通性自检：真登录一次，只读探测几类常见单据，
+    报告登录是否成功、这个账号大概能碰到哪些模块。**会真的向你的金蝶账套
+    发请求**，默认关闭；只读，不会调用任何写动词。首次接入时建议先这样跑
+    一遍，比等第一次业务查询失败才发现账号密码不对要快。
+
+    probe_nouns 留空时系统按"本租户已配置的业务操作入口 + 常见类别"自动挑
+    几个候选；也可以传逗号分隔的名词自己指定要探测哪几类，如
+    '销售订单,采购订单,物料'。"""
     from kingdee_ontology.base.validate_profile import validate
     errs, warns = validate(tenant or _TENANT)
-    return _fmt({"tenant": tenant or _TENANT, "ok": not errs,
-                 "errors": errs, "warnings": warns})
+    out = {"tenant": tenant or _TENANT, "ok": not errs,
+          "errors": errs, "warnings": warns}
+    if probe:
+        from kingdee_ontology.base.probe import probe_connection
+        nouns = ([x.strip() for x in probe_nouns.split(",") if x.strip()]
+                if probe_nouns else None)
+        try:
+            out["connection"] = await probe_connection(_d(), nouns=nouns)
+        except Exception as e:
+            out["connection"] = {"login": "failed",
+                                 "error": f"{type(e).__name__}: {e}"}
+    return _fmt(out)
 
 
 def main() -> None:

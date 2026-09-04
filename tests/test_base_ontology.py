@@ -233,6 +233,26 @@ class TestProfileValidation:
         errs, _ = validate("example-tenant")
         assert errs == []
 
+    def test_no_tenant_is_not_an_error(self):
+        """没指定租户＝没要覆盖层，用底座默认注册表——这是正常状态，不是缺配置。
+
+        load_profile("") 按约定返回 None 表达"没有覆盖层"；validate() 原来
+        把这和"指定了一个不存在的租户"混为一谈，报出「租户 '' 没有配置文件」——
+        这句话本身就说不通，压根没有叫"''"的租户。多数用户根本不配置租户
+        覆盖层，这个误报会让他们第一次跑校验就看见一条吓人的错误。
+        """
+        from kingdee_ontology.base.validate_profile import validate
+        errs, warns = validate("")
+        assert errs == []
+        assert warns == []
+
+    def test_nonexistent_named_tenant_still_errors(self):
+        """和上面不是一回事：明确起了个租户名但目录不存在，这才是真的配置问题。"""
+        from kingdee_ontology.base.ontology import OntologyError
+        from kingdee_ontology.base.validate_profile import validate
+        with pytest.raises(OntologyError):
+            validate("这个租户压根不存在")
+
     def test_broken_profile_reports_chinese_errors(self, tmp_path, monkeypatch):
         from kingdee_ontology.base import ontology as ont
         from kingdee_ontology.base.validate_profile import validate
@@ -308,3 +328,55 @@ class TestActAdvisories:
         d = Dispatcher(ontology=base_o, transport=FakeTransport([OK]))
         out = await d.act("audit", "采购订单", ["CGDD001"], current_state="B:审核中")
         assert "advisories" not in out
+
+
+class TestCheckProfileProbe:
+    """kd_check_profile(probe=True) 是唯一一处把探测接进 MCP 工具面的地方——
+    这条线必须端到端验证，光测 probe_connection() 本身不够：万一 server.py
+    忘了把 probe 参数接进去，或者 _d() 换掉了，不会有别的测试发现。
+    """
+
+    @pytest.fixture
+    def fake_dispatcher(self, base_o, monkeypatch):
+        from kingdee_ontology.base import server as bsrv
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([[], []]))
+        monkeypatch.setattr(bsrv, "_d", lambda: d)
+        return d
+
+    @pytest.mark.asyncio
+    async def test_probe_false_by_default_no_network_call(self, fake_dispatcher):
+        """默认不探测——静态校验和联通测试的成本完全不同，不能默认就打请求。"""
+        from kingdee_ontology.base.server import kd_check_profile
+        out = json.loads(await kd_check_profile(tenant=""))
+        assert "connection" not in out
+        assert fake_dispatcher.t.calls == []
+
+    @pytest.mark.asyncio
+    async def test_probe_true_reaches_the_fake_transport(self, fake_dispatcher):
+        from kingdee_ontology.base.server import kd_check_profile
+        out = json.loads(await kd_check_profile(
+            tenant="", probe=True, probe_nouns="销售订单,物料"))
+        assert "connection" in out
+        assert out["connection"]["ok"] == 2
+        assert len(fake_dispatcher.t.calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_probe_nouns_parsed_from_comma_string(self, fake_dispatcher):
+        from kingdee_ontology.base.server import kd_check_profile
+        out = json.loads(await kd_check_profile(
+            tenant="", probe=True, probe_nouns="物料"))
+        assert out["connection"]["candidates"] == ["物料"]
+
+    @pytest.mark.asyncio
+    async def test_probe_error_does_not_crash_the_tool(self, base_o, monkeypatch):
+        """连 Dispatcher 都建不起来（比如账套完全连不上）时，工具要给出
+        结构化的失败信息，而不是让整个调用抛出去、被 _guard 包成裸错误。"""
+        from kingdee_ontology.base import server as bsrv
+
+        def _boom():
+            raise RuntimeError("金蝶登录失败: 密码错误")
+        monkeypatch.setattr(bsrv, "_d", _boom)
+        from kingdee_ontology.base.server import kd_check_profile
+        out = json.loads(await kd_check_profile(tenant="", probe=True))
+        assert out["connection"]["login"] == "failed"
+        assert "密码错误" in out["connection"]["error"]
