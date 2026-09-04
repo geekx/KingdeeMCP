@@ -370,7 +370,10 @@ async def kd_check_profile(tenant: str = "", probe: bool = False,
 
     probe_nouns 留空时系统按"本租户已配置的业务操作入口 + 常见类别"自动挑
     几个候选；也可以传逗号分隔的名词自己指定要探测哪几类，如
-    '销售订单,采购订单,物料'。"""
+    '销售订单,采购订单,物料'。写一个本体不认识的 form_id 也可以——会绕开
+    本体解析直接探测，账号真的能查就说明是个未登记的表单，自动提一条建议到
+    WikiSkill（wikiskill/knowledge.json），供人日后决定要不要补进本体，
+    不会自动改配置。"""
     from kingdee_ontology.base.validate_profile import validate
     errs, warns = validate(tenant or _TENANT)
     out = {"tenant": tenant or _TENANT, "ok": not errs,

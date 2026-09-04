@@ -5,6 +5,7 @@
 （登录失败/网络问题）必须分成两种完全不同的处理——前者继续测下一个，
 后者立刻停，不然会把一次网络故障重复超时探测好几次。
 """
+import json
 import sys
 from pathlib import Path
 
@@ -91,6 +92,122 @@ class TestLegacyCatalogReuse:
                             lambda: frozenset({"BD_Material"}))
         picked = default_candidates(tenant_o, limit=10)
         assert picked.index("SAL_SaleOrder") < picked.index("BD_Material")
+
+
+class TestUnregisteredFormDiscovery:
+    """本体解析不出来的候选，只有调用方明确点名（nouns=）时才值得绕开本体
+    直接探测——default_candidates() 挑出来的永远已经在本体里，不会走这条路。
+
+    这条路是"发现候选 → 提 WikiSkill 建议"的桥：金蝶认这个 form_id、
+    没报业务错误，就说明账号能用、本体没登记，值得提一条建议；
+    金蝶自己就拒绝了（表单不存在/无权限），不提，按普通结果归类。
+    """
+
+    def _d(self, script, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)   # 隔离 wikiskill/knowledge.json 的写入位置
+        load.cache_clear()
+        d = Dispatcher(ontology=load(tenant=""), transport=FakeTransport(script))
+        load.cache_clear()
+        return d
+
+    @pytest.mark.asyncio
+    async def test_default_candidates_never_trigger_raw_fallback(self, base_o, tmp_path,
+                                                                  monkeypatch):
+        """不传 nouns 时，候选都保证已在本体里——不该有任何一次走原始探测。"""
+        d = self._d([[] for _ in range(10)], tmp_path, monkeypatch)
+        out = await probe_connection(d, limit=5)
+        assert not any(r.get("unregistered") for r in out["probed"])
+
+    @pytest.mark.asyncio
+    async def test_reachable_unregistered_form_is_reported_and_proposed(
+            self, tmp_path, monkeypatch):
+        """金蝶不报错＝认这个表单——报成 ok，且提一条 WikiSkill 建议。"""
+        d = self._d([[]], tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["YL_CustomBill"])
+        r = out["probed"][0]
+        assert r["outcome"] == "ok"
+        assert r["unregistered"] is True
+        assert out["unregistered_found"] == 1
+
+        kb = tmp_path / "wikiskill" / "knowledge.json"
+        assert kb.exists(), "探测到能用的未登记表单，应该沉淀一条建议，不能白探测一次"
+        entries = json.loads(kb.read_text(encoding="utf-8"))["entries"]
+        e = next(e for e in entries if e["kind"] == "unregistered_form_reachable")
+        assert "YL_CustomBill" in e["title"]
+        assert "profile.yml" in e["suggestion"]
+        assert "nouns" in e["suggestion"]
+
+    @pytest.mark.asyncio
+    async def test_rejected_unregistered_form_is_not_proposed(self, tmp_path, monkeypatch):
+        """金蝶自己就说"没这个表单"——不是"能用但没登记"，不该提建议。"""
+        d = self._d([{"kd_error": True, "message": "表单标识YL_Fake不存在"}],
+                    tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["YL_Fake"])
+        r = out["probed"][0]
+        assert r["outcome"] == "business_error"
+        assert r["unregistered"] is True
+        assert out["unregistered_found"] == 0
+        kb = tmp_path / "wikiskill" / "knowledge.json"
+        assert not kb.exists(), "没查通的表单不该被当成'发现'提给知识库"
+
+    @pytest.mark.asyncio
+    async def test_permission_denied_unregistered_form_classified_normally(
+            self, tmp_path, monkeypatch):
+        """权限判断对未登记表单同样适用——复用同一套关键词启发式，不是两套逻辑。"""
+        d = self._d([{"kd_error": True, "message": "该用户无权限访问此单据类型"}],
+                    tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["YL_NoPerm"])
+        assert out["probed"][0]["outcome"] == "no_permission"
+        assert out["probed"][0]["unregistered"] is True
+
+    @pytest.mark.asyncio
+    async def test_registered_noun_is_unaffected(self, base_o, tmp_path, monkeypatch):
+        """能正常解析的名词，走的还是原来的路，不该被打上 unregistered。"""
+        d = self._d([[]], tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["销售订单"])
+        assert "unregistered" not in out["probed"][0]
+
+    @pytest.mark.asyncio
+    async def test_transport_failure_during_fallback_still_stops_the_probe(
+            self, tmp_path, monkeypatch):
+        """原始探测本身跑不通（不是金蝶拒绝，是探测failed）——一样得停，
+        不能因为走的是兜底路径就不遵守"一出问题就停"的规矩。"""
+        class Boom(FakeTransport):
+            async def query(self, *a, **kw):
+                raise RuntimeError("金蝶登录失败: 密码错误")
+        d = self._d([], tmp_path, monkeypatch)
+        d.t = Boom()
+        out = await probe_connection(d, nouns=["YL_Custom", "销售订单"])
+        assert len(out["probed"]) == 1
+        assert out["probed"][0]["outcome"] == "blocked"
+        assert out["stopped_early"] is not None
+
+    def test_knowledge_base_unavailable_does_not_raise(self, tmp_path, monkeypatch):
+        """知识库写不进去，不该连累探测本身——和 navigate() 的 _propose_link_filter
+        一个原则：直接测这个函数自己吞不吞错误，而不是绕一圈通过探测流程猜。"""
+        monkeypatch.chdir(tmp_path)
+        import kingdee_ontology.wikiskill.knowledge as kb_mod
+        from kingdee_ontology.base.probe import _propose_unregistered_form
+
+        class BrokenKnowledge:
+            def __init__(self, *a, **kw):
+                raise OSError("磁盘满了")
+        monkeypatch.setattr(kb_mod, "Knowledge", BrokenKnowledge)
+        _propose_unregistered_form("YL_CustomBill")   # 不该抛
+
+    @pytest.mark.asyncio
+    async def test_probe_still_reports_ok_when_knowledge_base_is_broken(
+            self, tmp_path, monkeypatch):
+        """即使提议这一步坏了，探测本身该给的结果一条不能少。"""
+        d = self._d([[]], tmp_path, monkeypatch)
+        import kingdee_ontology.wikiskill.knowledge as kb_mod
+
+        class BrokenKnowledge:
+            def __init__(self, *a, **kw):
+                raise OSError("磁盘满了")
+        monkeypatch.setattr(kb_mod, "Knowledge", BrokenKnowledge)
+        out = await probe_connection(d, nouns=["YL_CustomBill"])
+        assert out["probed"][0]["outcome"] == "ok"
 
 
 class TestDefaultCandidates:
@@ -202,11 +319,13 @@ class TestProbeConnection:
         assert out["probed"][0]["noun"] == "BD_Material"
 
     @pytest.mark.asyncio
-    async def test_unknown_noun_is_skipped_not_fatal(self, base_o):
-        d = Dispatcher(ontology=base_o, transport=FakeTransport([[]]))
+    async def test_unresolvable_noun_does_not_crash_the_probe(self, base_o):
+        """本体解析不出来不该让整个探测炸掉——不管走不走原始兜底探测，
+        都得体面地产出一条结果，接着测下一个候选。"""
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([[], []]))
         out = await probe_connection(d, nouns=["这不是一个真的单据类型", "销售订单"])
-        assert len(out["probed"]) == 1
-        assert out["probed"][0]["noun"] == "SAL_SaleOrder"
+        assert len(out["probed"]) == 2
+        assert out["probed"][1]["noun"] == "SAL_SaleOrder"
 
     @pytest.mark.asyncio
     async def test_note_explains_heuristic_nature(self, base_o):

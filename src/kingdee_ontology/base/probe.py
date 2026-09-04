@@ -18,6 +18,21 @@
   * **候选优先复用 legacy 工具目录**，不是另起一份"常见表单"清单。
     `kingdee_mcp` 那 97 个专用工具背后有一份人工维护的 `FORM_CATALOG`，
     久经使用、行为摸得清楚，见 `default_candidates()`。
+
+## 嗅探到本体不认识的表单，怎么处理
+
+`default_candidates()` 选出来的永远是本体里已经注册过的名词——探测不到
+"未知"的东西。但调用方可以用 `nouns=` **明确点名**一个本体不认识的字符串
+（比如二开新建的单据 `form_id`）。这种情况下不是简单跳过：会绕开本体解析，
+直接拿这个字符串当 form_id 发一次原始查询，看金蝶认不认——
+
+  * 金蝶报"表单不存在"这类业务错误 → 按原样归到 `business_error`/
+    `no_permission`，只是多标一个 `unregistered: true`；
+  * 金蝶真的认、查得通 → 说明这是个账号能用、但本体没登记的表单，往
+    WikiSkill 提一条建议（`unregistered_form_reachable`），供人日后决定
+    要不要补进 `profiles/<租户>/profile.yml` 的 `nouns` 段——**只提议，
+    不自动改配置**，和 `navigate()` 探测出下推关联字段时的做法一样。
+    本体认得它之前，`kd_object` 这类工具依然用不了它，只有 `probe` 能查。
 """
 from __future__ import annotations
 
@@ -26,6 +41,7 @@ from typing import Optional
 
 from kingdee_ontology.base.dispatch import Dispatcher
 from kingdee_ontology.base.ontology import Ontology, OntologyError
+from kingdee_ontology.pipeline.parse import is_business_error
 from kingdee_ontology.pipeline.run import PipelineError
 
 # 覆盖不了所有账套的措辞，只是常见的几种——见模块 docstring 的"启发式"说明。
@@ -45,11 +61,14 @@ class ProbeResult:
     zh: str
     outcome: str            # ok | no_permission | business_error | blocked
     detail: str = ""
+    unregistered: bool = False   # 本体不认识这个 form_id，是调用方点名探测出来的
 
     def to_dict(self) -> dict:
         d = {"noun": self.noun, "zh": self.zh, "outcome": self.outcome}
         if self.detail:
             d["detail"] = self.detail
+        if self.unregistered:
+            d["unregistered"] = True
         return d
 
 
@@ -131,12 +150,59 @@ def _classify_business_error(msg: str) -> str:
     return "business_error"
 
 
+def _propose_unregistered_form(ref: str) -> None:
+    """把探测到的、账号能查但本体没登记的表单提给知识库。只提议，不自动改配置。
+
+    与 `dispatch.Dispatcher._propose_link_filter` 是同一套做法：写失败不该
+    连累探测本身，全程吞掉异常。
+    """
+    try:
+        import hashlib
+
+        from kingdee_ontology.wikiskill.knowledge import Entry, Knowledge
+        k = Knowledge()
+        k.merge(Entry(
+            id=hashlib.sha1(f"unregistered_form|{ref}".encode()).hexdigest()[:12],
+            kind="unregistered_form_reachable",
+            title=f"探测到未登记的表单 {ref}，账号能查",
+            detail=f"直接用 {ref!r} 当 form_id 发只读查询，金蝶没有报'表单不存在'"
+                   f"这类业务错误。",
+            suggestion=(f"人眼核对 {ref} 确实是想用的表单后，在 "
+                        f"profiles/<租户>/profile.yml 的 nouns 里补一条定义"
+                        f"（zh/category/allowed_verbs），见 profiles/README.md；"
+                        f"本体认得它之前，kd_object 等工具用不了它。"),
+            occurrences=1,
+            evidence=[{"form_id": ref}]))
+        k.save()
+    except Exception:
+        pass  # 知识库不可用不该连累探测
+
+
+async def _probe_unregistered(d: Dispatcher, ref: str) -> ProbeResult:
+    """本体解析不出这个名词，但调用方明确点名要探测——绕开本体，直接拿这个
+    字符串当 form_id 发一次原始查询，看金蝶认不认。见模块 docstring
+    「嗅探到本体不认识的表单，怎么处理」。
+    """
+    raw = await d.t.query(ref, "", "", 1)
+    err = is_business_error(raw)
+    if err is None:
+        # 没有业务错误——金蝶接受了这个 form_id，是账号能查、本体没登记的表单。
+        _propose_unregistered_form(ref)
+        return ProbeResult(ref, ref, "ok", unregistered=True)
+    return ProbeResult(ref, ref, _classify_business_error(err), err[:300],
+                       unregistered=True)
+
+
 async def probe_connection(d: Dispatcher, nouns: Optional[list[str]] = None,
                            limit: int = _DEFAULT_LIMIT) -> dict:
     """真登录一次，逐个只读探测。返回结果不抛异常——探测本身失败也是一种
     "答案"，让调用方决定怎么呈现，而不是把探测流程炸掉。
     """
     candidates = list(nouns) if nouns else default_candidates(d.o, limit=limit)
+    # 只有调用方明确点名的候选，才值得为"本体不认识"做兜底探测——自动挑出的
+    # 候选保证已经在本体里（default_candidates 只从 ontology.nouns 里选），
+    # 不会走到这条分支，不用担心默认探测平白多出一堆探测请求。
+    explicit = nouns is not None
     results: list[ProbeResult] = []
     stopped: Optional[dict] = None
 
@@ -144,6 +210,15 @@ async def probe_connection(d: Dispatcher, nouns: Optional[list[str]] = None,
         try:
             n = d.o.resolve_noun(ref)
         except OntologyError:
+            if not explicit:
+                continue
+            try:
+                results.append(await _probe_unregistered(d, ref))
+            except Exception as e:
+                msg = f"{type(e).__name__}: {e}"[:300]
+                results.append(ProbeResult(ref, ref, "blocked", msg, unregistered=True))
+                stopped = {"at": ref, "reason": msg, "untested": candidates[i + 1:]}
+                break
             continue
         try:
             await d.query(n.form_id, top=1)
@@ -168,7 +243,11 @@ async def probe_connection(d: Dispatcher, nouns: Optional[list[str]] = None,
         "candidates": candidates,
         "ok": sum(1 for r in results if r.outcome == "ok"),
         "no_permission": sum(1 for r in results if r.outcome == "no_permission"),
+        "unregistered_found": sum(1 for r in results
+                                  if r.unregistered and r.outcome == "ok"),
         "stopped_early": stopped,
         "note": ("no_permission 是按错误信息里的中文关键词启发式判断的，没有拿真实"
-                "账套逐一验证过措辞；拿不准时归到 business_error，不臆断成权限问题。"),
+                "账套逐一验证过措辞；拿不准时归到 business_error，不臆断成权限问题。"
+                " unregistered_found 里的表单已提给 WikiSkill，只是建议，"
+                "不会自动改配置。"),
     }

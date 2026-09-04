@@ -10,6 +10,25 @@
 
 ## [Unreleased]
 
+### 新增：探测到本体不认识的表单时，提一条建议而不是丢掉
+
+`probe_connection()` 原本只能测本体里已经注册过的名词——传一个本体不认识
+的字符串，此前是静默跳过，用户拿不到任何反馈。现在只要调用方用 `nouns=`
+**明确点名**了一个本体解析不出来的候选，就会绕开本体、直接拿这个字符串
+当 `form_id` 发一次原始只读查询，看金蝶认不认：
+
+- 金蝶报"表单不存在"这类业务错误 → 按原样归到 `business_error`/
+  `no_permission`，只是多标一个 `unregistered: true`；
+- 金蝶真的认、查得通 → 说明这是个账号能用、但本体没登记的表单，
+  自动提一条建议到 WikiSkill（`unregistered_form_reachable`），供人日后
+  决定要不要补进 `profiles/<租户>/profile.yml` 的 `nouns` 段——**只提议，
+  不自动改配置**，和 `navigate()` 探测出下推关联字段时的做法一模一样。
+
+`default_candidates()` 挑出来的候选保证已在本体里，不会触发这条兜底路径
+——只有调用方自己点名才会，默认自检不会因此多发请求。`kd_check_profile`
+与 `setup_check` 的报告都加了这条提示。8 条新测试覆盖分类边界（拒绝不提议、
+能查才提议）、权限判断复用同一套关键词启发式、知识库写不进去不连累探测本身。
+
 ### 新增：跨 harness 的引导式配置 —— 本地凭据文件 + 连通/权限自检
 
 驱动这套 MCP 的不一定是 Claude Code——Workbuddy、基于 DeepSeek 的 agent 之类

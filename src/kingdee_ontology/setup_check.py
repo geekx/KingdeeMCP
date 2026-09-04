@@ -79,10 +79,16 @@ def report_connection(result: dict) -> None:
         mark = {"ok": "✓", "no_permission": "✗ 无权限", "business_error": "? ",
                 "blocked": "‼"}.get(r["outcome"], r["outcome"])
         line = f"  {mark} {r['zh']}（{r['noun']}）"
+        if r.get("unregistered"):
+            line += "　⟨本体未登记，见下方⟩" if r["outcome"] == "ok" else "　⟨本体未登记⟩"
         if r.get("detail"):
             line += f" —— {r['detail']}"
         _p(line)
     _p(f"\n可查：{result['ok']} / 候选共 {len(result['candidates'])}")
+    if result.get("unregistered_found"):
+        _p(f"\n有 {result['unregistered_found']} 个是账号能用、但本体没登记的表单——"
+           f"已提给 WikiSkill（wikiskill/knowledge.json）当建议，不会自动改配置。"
+           f"人眼核对后想接进来，去补 profiles/<租户>/profile.yml 的 nouns 段。")
     if result["stopped_early"]:
         s = result["stopped_early"]
         _p(f"探测在「{s['at']}」中断：{s['reason']}")
@@ -98,7 +104,9 @@ async def _run(argv: Optional[list[str]]) -> int:
     ap.add_argument("--tenant", default=os.environ.get("KINGDEE_TENANT", ""),
                     help="租户名，读 profiles/<租户>/profile.yml；留空只用底座默认注册表")
     ap.add_argument("--nouns", default="",
-                    help="逗号分隔，自己指定要探测哪几类单据；留空用系统默认候选")
+                    help="逗号分隔，自己指定要探测哪几类单据；留空用系统默认候选。"
+                        "写一个本体不认识的 form_id 也可以——如果账号真的能查，"
+                        "会提一条建议到 wikiskill/knowledge.json")
     ap.add_argument("--limit", type=int, default=10, help="默认候选最多挑几个")
     ap.add_argument("--skip-probe", action="store_true", help="只查配置与 profile，不联网")
     ap.add_argument("--json", action="store_true", help="额外把结构化结果打到 stdout")

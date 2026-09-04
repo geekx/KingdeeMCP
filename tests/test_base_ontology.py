@@ -380,3 +380,19 @@ class TestCheckProfileProbe:
         out = json.loads(await kd_check_profile(tenant="", probe=True))
         assert out["connection"]["login"] == "failed"
         assert "密码错误" in out["connection"]["error"]
+
+    @pytest.mark.asyncio
+    async def test_probe_nouns_reaches_the_unregistered_form_path(
+            self, base_o, monkeypatch, tmp_path):
+        """probe_nouns 传一个本体不认识的 form_id 时，这条端到端链路要真的
+        走到 unregistered 分支——不是只有 probe_connection() 单元测试里测得到。
+        """
+        monkeypatch.chdir(tmp_path)
+        from kingdee_ontology.base import server as bsrv
+        d = Dispatcher(ontology=base_o, transport=FakeTransport([[]]))
+        monkeypatch.setattr(bsrv, "_d", lambda: d)
+        from kingdee_ontology.base.server import kd_check_profile
+        out = json.loads(await kd_check_profile(
+            tenant="", probe=True, probe_nouns="YL_CustomBill"))
+        assert out["connection"]["unregistered_found"] == 1
+        assert out["connection"]["probed"][0]["unregistered"] is True
