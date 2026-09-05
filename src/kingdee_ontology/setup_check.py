@@ -77,7 +77,7 @@ def report_connection(result: dict) -> None:
     _p("\n== ③ 联通与权限探测 ==")
     for r in result["probed"]:
         mark = {"ok": "✓", "no_permission": "✗ 无权限", "business_error": "? ",
-                "blocked": "‼"}.get(r["outcome"], r["outcome"])
+                "possible_report": "≈ 疑似报表", "blocked": "‼"}.get(r["outcome"], r["outcome"])
         line = f"  {mark} {r['zh']}（{r['noun']}）"
         if r.get("unregistered"):
             line += "　⟨本体未登记，见下方⟩" if r["outcome"] == "ok" else "　⟨本体未登记⟩"
@@ -89,6 +89,10 @@ def report_connection(result: dict) -> None:
         _p(f"\n有 {result['unregistered_found']} 个是账号能用、但本体没登记的表单——"
            f"已提给 WikiSkill（wikiskill/knowledge.json）当建议，不会自动改配置。"
            f"人眼核对后想接进来，去补 profiles/<租户>/profile.yml 的 nouns 段。")
+    if result.get("possible_reports"):
+        _p(f"\n有 {result['possible_reports']} 个像是报表类二开对象（GetSysReportData）——"
+           f"ExecuteBillQuery 天生查不到它们，不是权限问题，也还没确认真的可用，"
+           f"详见 docs/ontology/06-report-probing.md。")
     if result["stopped_early"]:
         s = result["stopped_early"]
         _p(f"探测在「{s['at']}」中断：{s['reason']}")
@@ -106,7 +110,9 @@ async def _run(argv: Optional[list[str]]) -> int:
     ap.add_argument("--nouns", default="",
                     help="逗号分隔，自己指定要探测哪几类单据；留空用系统默认候选。"
                         "写一个本体不认识的 form_id 也可以——如果账号真的能查，"
-                        "会提一条建议到 wikiskill/knowledge.json")
+                        "会提一条建议到 wikiskill/knowledge.json；如果像是报表类"
+                        "二开对象（GetSysReportData），会归类为「疑似报表」，"
+                        "见 docs/ontology/06-report-probing.md")
     ap.add_argument("--limit", type=int, default=10, help="默认候选最多挑几个")
     ap.add_argument("--skip-probe", action="store_true", help="只查配置与 profile，不联网")
     ap.add_argument("--json", action="store_true", help="额外把结构化结果打到 stdout")
