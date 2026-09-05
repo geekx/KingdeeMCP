@@ -17,6 +17,13 @@ from typing import Any, List, Literal, Optional, Callable
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+# 必须在下面任何 os.getenv("KINGDEE_*") 之前跑：把本地凭据文件（如果有）
+# 补进 os.environ。不同 harness 注入环境变量的方式并不统一，这一行让
+# 「配置写在一个文件里」在所有 harness 下都成立，不必是 kingdee_ontology
+# 的用户才享受得到——kingdee_mcp 是先起的那 97 个工具，同样需要这份配置。
+from kingdee_ontology.envfile import load_env_file
+load_env_file()
+
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.prompts.base import UserMessage

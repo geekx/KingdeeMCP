@@ -51,6 +51,7 @@ Documentation = "https://github.com/WaHaiLong/KingdeeMCP#readme"
 kingdee-mcp = "kingdee_mcp.server:main"          # 原 97 工具 MCP 服务端
 kingdee-ontology = "kingdee_ontology.base.server:main"   # 底座 MCP 服务端（11 工具）
 kd-logic = "kingdee_ontology.cli:main"           # 判断层，按需独立运行、不需要模型
+kingdee-setup-check = "kingdee_ontology.setup_check:main"  # 引导式环境自检：配置/连通/权限
 
 [tool.hatch.build.targets.wheel]
 # kingdee_ontology 此前**根本没被打包**：base/ aip/ saga/ 等都是仓库根目录下的
