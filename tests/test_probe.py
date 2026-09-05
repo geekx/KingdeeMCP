@@ -17,7 +17,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from kingdee_ontology.base.dispatch import Dispatcher              # noqa: E402
 from kingdee_ontology.base.ontology import load                    # noqa: E402
 from kingdee_ontology.base.probe import (                          # noqa: E402
-    _legacy_catalog_forms, default_candidates, probe_connection,
+    _legacy_catalog_forms, _looks_like_report_param_error,
+    default_candidates, probe_connection,
 )
 from kingdee_ontology.base.transport import FakeTransport          # noqa: E402
 
@@ -208,6 +209,134 @@ class TestUnregisteredFormDiscovery:
         monkeypatch.setattr(kb_mod, "Knowledge", BrokenKnowledge)
         out = await probe_connection(d, nouns=["YL_CustomBill"])
         assert out["probed"][0]["outcome"] == "ok"
+
+
+class TestReportParamErrorHeuristic:
+    """报表参数缺失异常的识别——两个关键词都出现才判定，避免"key"这种
+    常见词单独出现时把普通业务错误误判成报表。"""
+
+    def test_matches_the_observed_dotnet_shape(self):
+        assert _looks_like_report_param_error("值不能为 null。\n参数名: key")
+
+    def test_case_insensitive_on_the_latin_part(self):
+        assert _looks_like_report_param_error("值不能为 null。参数名: KEY")
+
+    def test_requires_both_markers_not_just_key(self):
+        assert not _looks_like_report_param_error("值不能为 null。参数名: value")
+
+    def test_requires_both_markers_not_just_the_chinese_one(self):
+        assert not _looks_like_report_param_error("参数名对不上，检查一下配置")
+
+    def test_unrelated_message_does_not_match(self):
+        assert not _looks_like_report_param_error("该用户无权限访问此单据类型")
+
+
+class TestReportProbing:
+    """未登记表单探测里，report() 兜底探测报表类二开对象的分支——见模块
+    docstring「一个结构性的盲区：报表类二开对象」。
+
+    这条路只在 query() 已经判定为业务错误之后才会走：query() 成功（真的
+    是账号能查的表单）或探测本身跑不通（异常）时不该触发。
+    """
+
+    def _d(self, script, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        load.cache_clear()
+        d = Dispatcher(ontology=load(tenant=""), transport=FakeTransport(script))
+        load.cache_clear()
+        return d
+
+    @pytest.mark.asyncio
+    async def test_report_param_error_is_classified_as_possible_report(
+            self, tmp_path, monkeypatch):
+        """query() 报业务错误，report() 空参数试探出参数缺失异常——
+        归类为 possible_report，且提一条 WikiSkill 建议。"""
+        script = [
+            {"kd_error": True, "message": "表单标识UZJK_SomeReport不存在"},
+            {"kd_error": True, "message": "值不能为 null。\n参数名: key"},
+        ]
+        d = self._d(script, tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["UZJK_SomeReport"])
+        r = out["probed"][0]
+        assert r["outcome"] == "possible_report"
+        assert r["unregistered"] is True
+        assert out["possible_reports"] == 1
+        assert out["unregistered_found"] == 0, "possible_report 不算'确认可用'"
+
+        kb = tmp_path / "wikiskill" / "knowledge.json"
+        assert kb.exists()
+        entries = json.loads(kb.read_text(encoding="utf-8"))["entries"]
+        e = next(e for e in entries if e["kind"] == "possible_report_unconfirmed")
+        assert "UZJK_SomeReport" in e["title"]
+        assert "FieldKeys" in e["suggestion"]
+
+    @pytest.mark.asyncio
+    async def test_detail_kept_is_the_query_error_not_the_report_probe(
+            self, tmp_path, monkeypatch):
+        """存下来的 detail 是 query() 那次的错误信息——report() 只是用来
+        辅助分类，它自己的错误文本不该覆盖掉本来的结论。"""
+        script = [
+            {"kd_error": True, "message": "这是 query 报的原始错误信息"},
+            {"kd_error": True, "message": "值不能为 null。参数名: key"},
+        ]
+        d = self._d(script, tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["UZJK_SomeReport"])
+        assert "这是 query 报的原始错误信息" in out["probed"][0]["detail"]
+
+    @pytest.mark.asyncio
+    async def test_ordinary_business_error_without_report_signature_is_unaffected(
+            self, tmp_path, monkeypatch):
+        """report() 空参数没触发那个特定异常形状——不该被误判成报表，
+        按原来的业务错误/权限分类走。"""
+        script = [
+            {"kd_error": True, "message": "该用户无权限访问此单据类型"},
+            {"kd_error": True, "message": "服务器内部错误"},
+        ]
+        d = self._d(script, tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["YL_NoPerm"])
+        assert out["probed"][0]["outcome"] == "no_permission"
+        assert out["possible_reports"] == 0
+
+    @pytest.mark.asyncio
+    async def test_report_probe_is_skipped_when_query_already_succeeds(
+            self, tmp_path, monkeypatch):
+        """query() 就查通了——这是普通的未登记表单发现，不该额外发一次
+        report() 探测请求。"""
+        d = self._d([[]], tmp_path, monkeypatch)
+        out = await probe_connection(d, nouns=["YL_CustomBill"])
+        assert out["probed"][0]["outcome"] == "ok"
+        assert out["possible_reports"] == 0
+        assert not any(c[0] == "report" for c in d.t.calls)
+
+    @pytest.mark.asyncio
+    async def test_report_probe_exception_falls_back_to_original_classification(
+            self, tmp_path, monkeypatch):
+        """report() 兜底探测自己炸了（网络/序列化之类，不是我们要找的那个
+        特定异常形状）——不该盖掉已经拿到的 query() 结论，也不该让整个
+        探测崩掉。"""
+        class ReportBoom(FakeTransport):
+            async def report(self, *a, **kw):
+                raise RuntimeError("ConnectError")
+        d = self._d([{"kd_error": True, "message": "表单标识不存在"}], tmp_path, monkeypatch)
+        d.t = ReportBoom(d.t.script)
+        out = await probe_connection(d, nouns=["YL_Fake"])
+        assert out["probed"][0]["outcome"] == "business_error"
+        assert out["possible_reports"] == 0
+
+    @pytest.mark.asyncio
+    async def test_note_mentions_report_probing_only_when_found(
+            self, tmp_path, monkeypatch):
+        d_none = self._d([[]], tmp_path, monkeypatch)
+        out_none = await probe_connection(d_none, nouns=["YL_CustomBill"])
+        assert "possible_reports" not in out_none["note"]
+
+        script = [
+            {"kd_error": True, "message": "表单标识不存在"},
+            {"kd_error": True, "message": "值不能为 null。参数名: key"},
+        ]
+        d_found = self._d(script, tmp_path, monkeypatch)
+        out_found = await probe_connection(d_found, nouns=["UZJK_SomeReport"])
+        assert "possible_reports" in out_found["note"]
 
 
 class TestDefaultCandidates:

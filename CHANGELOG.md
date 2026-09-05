@@ -10,6 +10,34 @@
 
 ## [Unreleased]
 
+### 新增：识别报表类二开对象，探测器不再把"问错端点"误当成"没权限"
+
+一次真实排障发现：标准单据探测都正常，但**报表类二开对象**（金蝶后台
+"报表"菜单下的自定义报表）一律探测失败——原因不是权限，是探测器问错了
+端点。`query()`（`ExecuteBillQuery`）只认单据，报表走的是完全独立的
+`GetSysReportData`；不管账号有没有权限，`ExecuteBillQuery` 对报表都会报
+"看起来像没权限/表单不存在"的业务错误。这是结构性盲区，不是权限关键词
+列表没覆盖全——`ExecuteBillQuery` 从设计上就查不到报表，词表扩多长都补
+不上。详见 `docs/ontology/06-report-probing.md`。
+
+`GetSysReportData` 需要真实的 `FieldKeys`/`Model`，因表而异、猜不出来
+（有真实案例试了十几种参数组合全部失败），所以探测器**不猜参数**，只做
+一件更保守的事：`_probe_unregistered()` 里 `query()` 判定为业务错误后，
+追加用空参数试一次 `report()`。金蝶在这种情况下典型会报一个 .NET 风格的
+参数缺失异常（形如"值不能为 null。参数名: key"）——这个异常形状本身就是
+信号：请求已经进了 `GetSysReportData` 的处理逻辑，说明这大概率是张真实
+存在的报表。新增 `possible_report` 分类，专门标记这种情况：**不算"确认
+可用"**（没有真实 `FieldKeys` 验证不了完整权限），但至少把"这是报表、
+别再当单据猜参数"说清楚，不用让下一个 agent 重复同样的瞎试。
+
+`probe_connection()` 返回体新增 `possible_reports` 计数与对应说明；
+`kd_check_profile`/`setup_check` 的报告新增"≈ 疑似报表"标记与提示，指向
+`docs/ontology/06-report-probing.md` 的手动接入步骤（F12 抓包拿真实
+`FieldKeys`/`Model`）。11 条新测试覆盖：参数缺失异常的关键词识别（两个
+标记词都要出现，避免"key"单独出现时误判）、`possible_report` 分类与
+WikiSkill 建议、`query()` 成功时跳过报表探测、`report()` 自身异常不影响
+原分类、聚合计数与提示文案。
+
 ### 新增：探测到本体不认识的表单时，提一条建议而不是丢掉
 
 `probe_connection()` 原本只能测本体里已经注册过的名词——传一个本体不认识

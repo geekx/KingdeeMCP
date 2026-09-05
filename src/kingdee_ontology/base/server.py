@@ -373,7 +373,10 @@ async def kd_check_profile(tenant: str = "", probe: bool = False,
     '销售订单,采购订单,物料'。写一个本体不认识的 form_id 也可以——会绕开
     本体解析直接探测，账号真的能查就说明是个未登记的表单，自动提一条建议到
     WikiSkill（wikiskill/knowledge.json），供人日后决定要不要补进本体，
-    不会自动改配置。"""
+    不会自动改配置。如果这个陌生 form_id 报的错像是报表类二开对象
+    （GetSysReportData，而不是单据用的 ExecuteBillQuery），会归类为
+    possible_report——不是权限问题，也还没确认真的可用，详见
+    docs/ontology/06-report-probing.md。"""
     from kingdee_ontology.base.validate_profile import validate
     errs, warns = validate(tenant or _TENANT)
     out = {"tenant": tenant or _TENANT, "ok": not errs,
